@@ -1,0 +1,80 @@
+# Multi-notification workflow - Send updates to multiple channels
+
+name: Update Versions with Multi-Channel Notifications
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  update-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Primary update with built-in Slack notification
+      - name: Update versions
+        id: update
+        uses: drumandbytes/argocd-gitops-updater-action@v1
+        with:
+          config-path: '.update-config.yaml'
+          create-pr: true
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          notification-method: slack
+          slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      # Additional Teams notification
+      - name: Notify Microsoft Teams
+        if: steps.update.outputs.changes-detected == 'true'
+        uses: aliencube/microsoft-teams-actions@v0.8.0
+        with:
+          webhook_uri: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          title: '📦 Version Updates Available'
+          summary: 'New Helm chart and Docker image versions detected'
+          text: |
+            A pull request has been created with version updates.
+
+            **PR:** ${{ steps.update.outputs.pr-url }}
+
+            **Changes:**
+            ```
+            ${{ steps.update.outputs.update-report }}
+            ```
+
+      # Create GitHub issue for tracking
+      - name: Create tracking issue
+        if: steps.update.outputs.changes-detected == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prUrl = '${{ steps.update.outputs.pr-url }}';
+            const report = `${{ steps.update.outputs.update-report }}`;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Version updates available - ${new Date().toISOString().split('T')[0]}`,
+              body: `## Automated Version Updates\n\nA pull request has been created with the following updates:\n\n**PR:** ${prUrl}\n\n### Update Report\n\`\`\`\n${report}\n\`\`\`\n\n**Action:** Please review and merge the PR.`,
+              labels: ['dependencies', 'automated']
+            });
+
+      # Email notification using GitHub's notification system
+      - name: Mention team for review
+        if: steps.update.outputs.changes-detected == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.update.outputs.pr-number }},
+              body: 'cc: @your-team - Please review these automated version updates.'
+            });

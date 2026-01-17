@@ -1,0 +1,376 @@
+name: 'Container & Helm Version Updater'
+description: 'Automatically update Helm chart versions and Docker image tags in GitOps repositories'
+author: 'drumandbytes'
+
+branding:
+  icon: 'refresh-cw'
+  color: 'blue'
+
+inputs:
+  config-path:
+    description: 'Path to the update configuration YAML file'
+    required: false
+    default: '.update-config.yaml'
+
+  auto-discover:
+    description: 'Auto-discover resources before updating (true/false)'
+    required: false
+    default: 'false'
+
+  working-directory:
+    description: 'Working directory for the action'
+    required: false
+    default: '.'
+
+  create-pr:
+    description: 'Create a pull request with changes (true/false)'
+    required: false
+    default: 'true'
+
+  pr-title:
+    description: 'Title for the pull request'
+    required: false
+    default: 'chore: update Helm charts & Docker images'
+
+  pr-branch:
+    description: 'Branch name for the pull request'
+    required: false
+    default: 'chore/update-versions'
+
+  pr-base:
+    description: 'Base branch for the pull request'
+    required: false
+    default: 'main'
+
+  commit-message:
+    description: 'Commit message for changes'
+    required: false
+    default: 'chore: update Helm charts & Docker images'
+
+  dry-run:
+    description: 'Run in dry-run mode without making changes (true/false)'
+    required: false
+    default: 'false'
+
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.12'
+
+  notification-method:
+    description: 'Notification method: telegram, slack, microsoft-teams, discord, or none'
+    required: false
+    default: 'none'
+
+  telegram-bot-token:
+    description: 'Telegram bot token for notifications (required if notification-method is telegram)'
+    required: false
+    default: ''
+
+  telegram-chat-id:
+    description: 'Telegram chat ID for notifications (required if notification-method is telegram)'
+    required: false
+    default: ''
+
+  slack-webhook-url:
+    description: 'Slack webhook URL for notifications (required if notification-method is slack)'
+    required: false
+    default: ''
+
+  teams-webhook-url:
+    description: 'Microsoft Teams webhook URL for notifications (required if notification-method is microsoft-teams)'
+    required: false
+    default: ''
+
+  discord-webhook-url:
+    description: 'Discord webhook URL for notifications (required if notification-method is discord)'
+    required: false
+    default: ''
+
+  dockerhub-username:
+    description: 'Docker Hub username for authentication (optional, increases rate limit from 100 to 200 req/6h)'
+    required: false
+    default: ''
+
+  dockerhub-token:
+    description: 'Docker Hub access token for authentication (optional, get from https://hub.docker.com/settings/security)'
+    required: false
+    default: ''
+
+  github-token:
+    description: 'GitHub token for ghcr.io authentication (default: github.token)'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  discovery-changes-detected:
+    description: 'Whether auto-discovery found new resources (true/false)'
+    value: ${{ steps.discovery-changes.outputs.changes }}
+
+  discovery-pr-number:
+    description: 'Discovery pull request number (if created)'
+    value: ${{ steps.discovery-pr.outputs.pull-request-number }}
+
+  discovery-pr-url:
+    description: 'Discovery pull request URL (if created)'
+    value: ${{ steps.discovery-pr.outputs.pull-request-url }}
+
+  changes-detected:
+    description: 'Whether any version update changes were detected (true/false)'
+    value: ${{ steps.check-changes.outputs.changes }}
+
+  update-report:
+    description: 'Summary report of updates made'
+    value: ${{ steps.report.outputs.report }}
+
+  pr-number:
+    description: 'Version update pull request number (if created)'
+    value: ${{ steps.create-pr.outputs.pull-request-number }}
+
+  pr-url:
+    description: 'Version update pull request URL (if created)'
+    value: ${{ steps.create-pr.outputs.pull-request-url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [ "${{ inputs.auto-discover }}" != "true" ] && [ "${{ inputs.auto-discover }}" != "false" ]; then
+          echo "Error: auto-discover must be 'true' or 'false'"
+          exit 1
+        fi
+        if [ "${{ inputs.create-pr }}" != "true" ] && [ "${{ inputs.create-pr }}" != "false" ]; then
+          echo "Error: create-pr must be 'true' or 'false'"
+          exit 1
+        fi
+        if [ "${{ inputs.dry-run }}" != "true" ] && [ "${{ inputs.dry-run }}" != "false" ]; then
+          echo "Error: dry-run must be 'true' or 'false'"
+          exit 1
+        fi
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: 'pip'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # Check if pyproject.toml exists in the action directory
+        ACTION_DIR="${{ github.action_path }}"
+        if [ -f "${ACTION_DIR}/pyproject.toml" ]; then
+          echo "Installing dependencies from action pyproject.toml..."
+          uv pip install --system -r <(uv pip compile "${ACTION_DIR}/pyproject.toml")
+        else
+          echo "Installing required dependencies directly..."
+          uv pip install --system requests pyyaml packaging
+        fi
+
+    - name: Auto-discover resources
+      if: inputs.auto-discover == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
+      run: |
+        echo "Auto-discovering resources..."
+        python "${{ github.action_path }}/.github/scripts/discover-resources.py"
+
+    - name: Check for discovery changes
+      id: discovery-changes
+      if: inputs.auto-discover == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if git diff --quiet ${{ inputs.config-path }}; then
+          echo "changes=false" >> $GITHUB_OUTPUT
+          echo "No discovery changes detected"
+        else
+          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "Discovery changes detected"
+          echo "Changes to ${{ inputs.config-path }}:"
+          git diff ${{ inputs.config-path }}
+        fi
+
+    - name: Create Pull Request for Auto-Discovery
+      id: discovery-pr
+      if: inputs.auto-discover == 'true' && steps.discovery-changes.outputs.changes == 'true' && inputs.create-pr == 'true' && inputs.dry-run == 'false'
+      uses: peter-evans/create-pull-request@v7
+      with:
+        token: ${{ github.token }}
+        commit-message: "chore: auto-discover new resources"
+        title: "chore: auto-discover new Helm charts & Docker images"
+        body: |
+          Automated discovery of new resources in the repository.
+
+          This PR updates `${{ inputs.config-path }}` with newly discovered:
+          - Argo CD Applications with Helm charts
+          - Kustomize Helm chart references
+          - Docker images in Kubernetes manifests
+
+          **⚠️ Please review the changes before merging.**
+
+          Once merged, these resources will be included in future automated version updates.
+
+          ---
+          *This PR was automatically created by the [Container & Helm Version Updater](https://github.com/${{ github.repository }}) action.*
+        branch: "chore/auto-discovery"
+        base: ${{ inputs.pr-base }}
+        delete-branch: true
+
+    - name: Stop if discovery PR was created
+      if: steps.discovery-pr.outputs.pull-request-number
+      shell: bash
+      run: |
+        echo "::notice::Auto-discovery PR created: ${{ steps.discovery-pr.outputs.pull-request-url }}"
+        echo "Stopping workflow to allow review of discovered resources before version updates."
+        exit 0
+
+    - name: Run version updater
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CONFIG_PATH: ${{ inputs.config-path }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
+      run: |
+        echo "Running version updater..."
+        if [ "$DRY_RUN" = "true" ]; then
+          python "${{ github.action_path }}/.github/scripts/update-versions.py" --dry-run
+        else
+          python "${{ github.action_path }}/.github/scripts/update-versions.py"
+        fi
+
+    - name: Check for changes
+      id: check-changes
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if git diff --quiet; then
+          echo "changes=false" >> $GITHUB_OUTPUT
+          echo "No changes detected"
+        else
+          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "Changes detected"
+        fi
+
+    - name: Capture update report
+      id: report
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        REPORT_FILE="${{ inputs.config-path }}.report"
+        if [ -f ".update-report.txt" ]; then
+          {
+            echo 'report<<EOF'
+            cat .update-report.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+          # Also save to a file for later use
+          cp .update-report.txt "$REPORT_FILE"
+        else
+          echo "report=(No detailed update report was generated.)" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Create Pull Request
+      id: create-pr
+      if: inputs.create-pr == 'true' && steps.check-changes.outputs.changes == 'true' && inputs.dry-run == 'false'
+      uses: peter-evans/create-pull-request@v7
+      with:
+        token: ${{ github.token }}
+        commit-message: ${{ inputs.commit-message }}
+        title: ${{ inputs.pr-title }}
+        body: |
+          Automated update of Helm chart versions and Docker image tags.
+
+          ```
+          ${{ steps.report.outputs.report }}
+          ```
+
+          ---
+          *This PR was automatically created by the [Container & Helm Version Updater](https://github.com/${{ github.repository }}) action.*
+        branch: ${{ inputs.pr-branch }}
+        base: ${{ inputs.pr-base }}
+        delete-branch: true
+
+    - name: Send Telegram notification
+      if: inputs.telegram-bot-token != '' && inputs.telegram-chat-id != '' && steps.check-changes.outputs.changes == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ inputs.telegram-bot-token }}
+        TELEGRAM_CHAT_ID: ${{ inputs.telegram-chat-id }}
+        PR_URL: ${{ steps.create-pr.outputs.pull-request-url }}
+        PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        PR_OPERATION: ${{ steps.create-pr.outputs.pull-request-operation }}
+        PR_TITLE: ${{ inputs.pr-title }}
+        RAW_REPORT: ${{ steps.report.outputs.report }}
+      run: |
+        set -euo pipefail
+
+        # Escape HTML entities
+        PR_TITLE_ESCAPED=$(python3 - << 'PY'
+        import html, os
+        print(html.escape(os.environ.get("PR_TITLE", "")))
+        PY
+        )
+
+        PR_URL_ESCAPED=$(python3 - << 'PY'
+        import html, os
+        print(html.escape(os.environ.get("PR_URL", "")))
+        PY
+        )
+
+        REPORT_ESCAPED=$(python3 - << 'PY'
+        import html, os
+        print(html.escape(os.environ.get("RAW_REPORT", "")))
+        PY
+        )
+
+        if [ -n "$PR_URL" ]; then
+          TEXT=$(cat <<EOF
+        <b>📦 Version Update Completed</b>
+
+        <b>🔌 PR</b>
+        <a href="${PR_URL_ESCAPED}">${PR_URL_ESCAPED}</a>
+
+        <b>⚙️ Operation</b>
+        ${PR_OPERATION}
+
+        <b>📝 Title</b>
+        ${PR_TITLE_ESCAPED}
+
+        <b>📋 Update summary</b>
+        <pre>${REPORT_ESCAPED}</pre>
+        EOF
+        )
+        else
+          TEXT=$(cat <<EOF
+        <b>📦 Version Update Completed</b>
+
+        <b>📝 Title</b>
+        ${PR_TITLE_ESCAPED}
+
+        <b>📋 Update summary</b>
+        <pre>${REPORT_ESCAPED}</pre>
+        EOF
+        )
+        fi
+
+        curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode=HTML \
+          --data-urlencode text="${TEXT}" || echo "Failed to send Telegram notification"

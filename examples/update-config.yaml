@@ -1,0 +1,115 @@
+# Example configuration for ArgoCD GitOps Updater Action
+# Place this file as .update-config.yaml in your repository root
+
+# Helm Charts Configuration
+helmCharts:
+  # Example 1: ArgoCD Application with Helm chart
+  - name: prometheus
+    repository: https://prometheus-community.github.io/helm-charts
+    chartName: prometheus
+    files:
+      # Update Chart.yaml dependency version
+      - path: apps/monitoring/prometheus/Chart.yaml
+        versionKey: dependencies[0].version
+
+  # Example 2: Kustomize Helm chart reference
+  - name: grafana
+    repository: https://grafana.github.io/helm-charts
+    chartName: grafana
+    files:
+      # Update version in kustomization.yaml
+      - path: apps/monitoring/grafana/kustomization.yaml
+        versionKey: helmCharts[0].version
+
+  # Example 3: ArgoCD Application spec
+  - name: cert-manager
+    repository: https://charts.jetstack.io
+    chartName: cert-manager
+    files:
+      - path: argocd/cert-manager-app.yaml
+        versionKey: spec.source.targetRevision
+
+# Docker Images Configuration
+dockerImages:
+  # Example 1: PostgreSQL with Alpine variant
+  - id: postgres-primary
+    repository: postgres
+    registry: dockerhub
+    currentTag: "16.1-alpine"
+    files:
+      - path: apps/database/postgres/deployment.yaml
+        imageKey: spec.template.spec.containers[0].image
+
+  # Example 2: Redis
+  - id: redis-cache
+    repository: redis
+    registry: dockerhub
+    currentTag: "7.2-alpine"
+    files:
+      - path: apps/cache/deployment.yaml
+        imageKey: spec.template.spec.containers[0].image
+
+  # Example 3: GitHub Container Registry
+  - id: my-app
+    repository: myorg/myapp
+    registry: ghcr.io
+    currentTag: "1.2.3"
+    files:
+      - path: apps/myapp/deployment.yaml
+        imageKey: spec.template.spec.containers[0].image
+
+  # Example 4: Quay.io
+  - id: prometheus
+    repository: prometheus/prometheus
+    registry: quay.io
+    currentTag: "v2.48.0"
+    files:
+      - path: apps/monitoring/prometheus/deployment.yaml
+        imageKey: spec.template.spec.containers[0].image
+
+  # Example 5: Multiple files for the same image
+  - id: nginx
+    repository: nginx
+    registry: dockerhub
+    currentTag: "1.25-alpine"
+    files:
+      - path: apps/frontend/deployment.yaml
+        imageKey: spec.template.spec.containers[0].image
+      - path: apps/frontend/daemonset.yaml
+        imageKey: spec.template.spec.containers[0].image
+
+# Ignore/Blacklist Configuration (Optional)
+ignore:
+  # Ignore specific Docker images
+  dockerImages:
+    # Ignore by ID - won't update this specific entry
+    - id: legacy-postgres
+      reason: "Keeping on old version until migration complete"
+
+    # Ignore by repository - won't update any image from this repo
+    - repository: mysql
+      reason: "Migrating to PostgreSQL, no need to update"
+
+    # Ignore by repository and tag pattern - won't update matching tags
+    - repository: nginx
+      tagPattern: "^.*-perl$"  # Ignore all nginx-perl variants
+      reason: "Don't use perl variant"
+
+    - repository: postgres
+      tagPattern: "^17\\."  # Ignore PostgreSQL 17.x
+      reason: "Not ready for PostgreSQL 17 yet"
+
+  # Ignore specific Helm charts
+  helmCharts:
+    # Ignore by name - won't update this chart
+    - name: deprecated-chart
+      reason: "Scheduled for removal"
+
+    # Ignore by version pattern - won't update to matching versions
+    - name: prometheus
+      versionPattern: "^25\\."  # Ignore version 25.x
+      reason: "Version 25 has breaking changes"
+
+    - name: grafana
+      versionPattern: ".*-beta.*"  # Ignore beta versions
+      reason: "Only use stable releases"

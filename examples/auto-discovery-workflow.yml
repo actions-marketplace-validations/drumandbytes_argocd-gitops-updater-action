@@ -1,0 +1,45 @@
+# Auto-discovery workflow - Automatically find and add new resources
+# This is useful when you add new applications to your GitOps repo
+
+name: Auto-Discover Resources
+
+on:
+  # Run weekly to discover new resources
+  schedule:
+    - cron: '0 3 * * 0'  # Every Sunday at 3 AM
+
+  # Allow manual triggering
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-discover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Auto-discover resources
+        id: discover
+        uses: drumandbytes/argocd-gitops-updater-action@v1
+        with:
+          auto-discover: true
+          config-path: '.update-config.yaml'
+          create-pr: true
+          pr-title: 'chore: auto-discover new Helm charts & Docker images'
+          pr-branch: 'chore/auto-discovery'
+
+      - name: Comment on PR if created
+        if: steps.discover.outputs.discovery-pr-number
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.discover.outputs.discovery-pr-number }},
+              body: '⚠️ **Please review these auto-discovered resources carefully before merging.**\n\nOnce merged, these resources will be included in automated version updates.'
+            });

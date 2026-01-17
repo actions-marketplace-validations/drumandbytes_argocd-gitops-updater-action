@@ -1,0 +1,39 @@
+# Basic workflow - Scheduled version updates with PR creation
+# Place this in .github/workflows/update-versions.yml in your repository
+
+name: Update Versions
+
+on:
+  # Run every Monday at 2 AM UTC
+  schedule:
+    - cron: '0 2 * * 1'
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Run in dry-run mode (no changes)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update Helm charts and Docker images
+        uses: drumandbytes/argocd-gitops-updater-action@v1
+        with:
+          config-path: '.update-config.yaml'
+          create-pr: true
+          pr-title: 'chore: update Helm charts & Docker images'
+          pr-branch: 'chore/update-versions'
+          pr-base: 'main'
+          dry-run: ${{ github.event.inputs.dry-run || false }}

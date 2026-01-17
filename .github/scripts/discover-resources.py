@@ -82,10 +82,11 @@ def discover_argo_apps(root: Path) -> list[dict[str, Any]]:
             repo_url = source.get("repoURL")
 
             if chart and repo_url:
-                # Only include Helm chart repos (not git repos)
+                # Only include Helm chart repos (URLs starting with http/https)
+                # Skip git repositories (ending with .git)
                 if not repo_url.startswith("http"):
                     continue
-                if ".git" in repo_url:
+                if repo_url.endswith(".git"):
                     continue
 
                 apps.append({

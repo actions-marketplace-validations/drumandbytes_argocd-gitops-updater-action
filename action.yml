@@ -235,6 +235,7 @@ runs:
         exit 0
 
     - name: Run version updater
+      if: steps.discovery-pr.outputs.pull-request-number == ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -253,6 +254,7 @@ runs:
 
     - name: Check for changes
       id: check-changes
+      if: steps.discovery-pr.outputs.pull-request-number == ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
@@ -266,6 +268,7 @@ runs:
 
     - name: Capture update report
       id: report
+      if: steps.discovery-pr.outputs.pull-request-number == ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
@@ -283,6 +286,7 @@ runs:
         fi
 
     - name: Clean up report files before commit
+      if: steps.discovery-pr.outputs.pull-request-number == ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |

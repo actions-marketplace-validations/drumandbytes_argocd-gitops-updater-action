@@ -395,27 +395,24 @@ The action automatically uses `${{ github.token }}` for ghcr.io authentication. 
 
 ### Slack
 
-**Setup steps:**
+**Prerequisites:** You need a Slack workspace. If you don't have one, create at https://slack.com/create
 
-1. **Create a Slack workspace** (if needed): https://slack.com/create
-2. **Create a channel** (or use existing like #general)
-3. **Create Incoming Webhook**:
-   - Go to https://api.slack.com/messaging/webhooks
-   - Click "Create your Slack app" → "From scratch"
-   - Name your app (e.g., "Version Updater")
-   - Select your workspace
-   - Click "Incoming Webhooks" → Toggle "Activate Incoming Webhooks" to ON
-   - Click "Add New Webhook to Workspace"
-   - Select the channel where notifications will be posted
-   - Click "Allow"
-   - Copy the webhook URL (starts with `https://hooks.slack.com/services/...`)
+**Create Incoming Webhook:**
 
-4. **Add to GitHub Secrets**:
-   - GitHub repo → Settings → Secrets and variables → Actions
-   - New repository secret: `SLACK_WEBHOOK_URL`
-   - Paste the webhook URL
+1. Go to https://api.slack.com/messaging/webhooks
+2. Click "Create your Slack app" → "From scratch"
+3. Name your app (e.g., "Version Updater") and select your workspace
+4. Click "Incoming Webhooks" → Toggle "Activate Incoming Webhooks" to ON
+5. Click "Add New Webhook to Workspace"
+6. Select the channel where notifications will be posted → Click "Allow"
+7. Copy the webhook URL (starts with `https://hooks.slack.com/services/...`)
 
-5. **Use in workflow**:
+**Add to GitHub Secrets:**
+- Repository Settings → Secrets and variables → Actions → New repository secret
+- Name: `SLACK_WEBHOOK_URL`
+- Value: Your webhook URL
+
+**Use in workflow:**
 ```yaml
 notification-method: slack
 slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -425,81 +422,46 @@ slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
 
 > **⚠️ Note:** Microsoft Teams support is implemented according to the official Microsoft Teams Incoming Webhook API documentation but has not been personally tested by the maintainer due to Teams Free tier limitations. The implementation follows the same pattern as other notification platforms (Slack, Discord, Telegram) which have been tested. If you encounter issues, please [report them](https://github.com/drumandbytes/argocd-gitops-updater-action/issues).
 
-**Setup steps:**
+**Prerequisites:** You need Microsoft Teams with a team and channel (work/school account). Free tier may have limitations.
 
-1. **Create a Team** (if you don't have one):
-   - Open Microsoft Teams (web: https://teams.microsoft.com or desktop app)
-   - Click "Teams" in the left sidebar
-   - Click "Join or create a team" → "Create team"
-   - Choose "From scratch" → "Public" or "Private"
-   - Name it (e.g., "GitOps Notifications" or "Test Team")
+**Create Incoming Webhook:**
 
-2. **Create a Channel** (optional, or use "General" channel):
-   - In your team, click "..." → "Add channel"
-   - Name it (e.g., "version-updates")
+1. Open Microsoft Teams and go to your channel (e.g., "General")
+2. Click "..." (three dots) next to the channel name
+3. Select "Workflows" or "Connectors" (depends on Teams version):
+   - **New Teams:** Search for "Incoming Webhook" → Add → Configure → Copy webhook URL
+   - **Classic Teams:** Select "Incoming Webhook" → Configure → Name it → Create → Copy webhook URL
 
-3. **Create Incoming Webhook**:
-   - Go to your channel (e.g., "General" or "version-updates")
-   - Click "..." (three dots) next to the channel name
-   - Select "Connectors" or "Workflows" (depends on Teams version)
+**Add to GitHub Secrets:**
+- Repository Settings → Secrets and variables → Actions → New repository secret
+- Name: `TEAMS_WEBHOOK_URL`
+- Value: Your webhook URL
 
-   **For new Teams (Workflows):**
-   - Search for "Incoming Webhook"
-   - Click "Add" → "Add to a team"
-   - Select your channel → Configure
-   - Give it a name (e.g., "Version Updater")
-   - Copy the webhook URL
-
-   **For classic Teams (Connectors):**
-   - Click "..." → "Connectors"
-   - Search for "Incoming Webhook" → Configure
-   - Give it a name (e.g., "Version Updater")
-   - Upload an icon (optional)
-   - Click "Create" → Copy the webhook URL
-
-4. **Add to GitHub Secrets**:
-   - Go to your GitHub repo → Settings → Secrets and variables → Actions
-   - Click "New repository secret"
-   - Name: `TEAMS_WEBHOOK_URL`
-   - Value: Paste the webhook URL
-   - Click "Add secret"
-
-5. **Use in workflow**:
+**Use in workflow:**
 ```yaml
 notification-method: microsoft-teams
 teams-webhook-url: ${{ secrets.TEAMS_WEBHOOK_URL }}
 ```
 
-**Note:** If you see Skype data in Teams, that's normal - Teams replaced Skype for Business. You can create new teams/channels separate from your Skype history.
-
 ### Discord
 
-**Setup steps:**
+**Prerequisites:** You need a Discord server. If you don't have one, create at https://discord.com
 
-1. **Create a Discord server** (if needed):
-   - Open Discord (web: https://discord.com or desktop app)
-   - Click "+" → "Create My Own" → Choose template or "Skip"
-   - Name your server (e.g., "GitOps Notifications")
+**Create Webhook:**
 
-2. **Create a channel** (or use existing like #general):
-   - Click "+" next to "Text Channels"
-   - Name it (e.g., "version-updates")
+1. Right-click on the channel where you want notifications → "Edit Channel"
+2. Go to "Integrations" → "Webhooks"
+3. Click "New Webhook" or "Create Webhook"
+4. Give it a name (e.g., "Version Updater") and optionally upload an avatar
+5. Click "Copy Webhook URL"
+6. Click "Save Changes"
 
-3. **Create Webhook**:
-   - Right-click on the channel → "Edit Channel"
-   - Go to "Integrations" → "Webhooks" (or "Create Webhook")
-   - Click "New Webhook" or "Create Webhook"
-   - Give it a name (e.g., "Version Updater")
-   - Upload an avatar (optional)
-   - Click "Copy Webhook URL"
-   - Click "Save Changes"
+**Add to GitHub Secrets:**
+- Repository Settings → Secrets and variables → Actions → New repository secret
+- Name: `DISCORD_WEBHOOK_URL`
+- Value: Your webhook URL
 
-4. **Add to GitHub Secrets**:
-   - GitHub repo → Settings → Secrets and variables → Actions
-   - New repository secret: `DISCORD_WEBHOOK_URL`
-   - Paste the webhook URL
-
-5. **Use in workflow**:
+**Use in workflow:**
 ```yaml
 notification-method: discord
 discord-webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -507,37 +469,23 @@ discord-webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
 ### Telegram
 
-**Setup steps:**
+**Create a bot:**
 
-1. **Create a bot**:
-   - Open Telegram and search for `@BotFather`
-   - Start a chat and send `/newbot`
-   - Follow the prompts to choose a name and username for your bot
-   - Copy the **bot token** (looks like `123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`)
+1. Open Telegram and search for `@BotFather`
+2. Send `/newbot` and follow prompts to choose a name and username
+3. Copy the **bot token** (looks like `123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`)
 
-2. **Get your chat ID**:
-   - **Option A - Personal chat:**
-     - Search for `@userinfobot` in Telegram
-     - Start a chat and send any message
-     - It will reply with your chat ID (a number like `123456789`)
+**Get your chat ID:**
 
-   - **Option B - Group chat:**
-     - Create a group and add your bot as a member
-     - Add `@userinfobot` to the group temporarily
-     - Send a message to the group
-     - `@userinfobot` will reply with the group chat ID (negative number like `-987654321`)
-     - Remove `@userinfobot` from the group
+- **For personal chat:** Search for `@userinfobot` → Send any message → Copy your chat ID
+- **For group chat:** Add your bot to a group → Add `@userinfobot` temporarily → Send a message → Copy the group chat ID (negative number) → Remove `@userinfobot`
 
-3. **Test the bot** (optional):
-   - Start a chat with your bot (search for the username you created)
-   - Send `/start` to initiate the conversation
+**Add to GitHub Secrets:**
+- Repository Settings → Secrets and variables → Actions → New repository secret
+- Name: `TELEGRAM_BOT_TOKEN` (paste the bot token)
+- Name: `TELEGRAM_CHAT_ID` (paste the chat ID)
 
-4. **Add to GitHub Secrets**:
-   - GitHub repo → Settings → Secrets and variables → Actions
-   - New repository secret: `TELEGRAM_BOT_TOKEN` (paste the token from step 1)
-   - New repository secret: `TELEGRAM_CHAT_ID` (paste the chat ID from step 2)
-
-5. **Use in workflow**:
+**Use in workflow:**
 ```yaml
 notification-method: telegram
 telegram-bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}

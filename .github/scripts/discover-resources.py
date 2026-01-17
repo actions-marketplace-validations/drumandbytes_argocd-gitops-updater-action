@@ -138,6 +138,48 @@ def discover_kustomize_helm_charts(root: Path) -> list[dict[str, Any]]:
     return sorted(result, key=lambda x: x["name"])
 
 
+def discover_chart_dependencies(root: Path) -> list[dict[str, Any]]:
+    """
+    Find all Chart.yaml files with dependencies.
+    Returns list of {name, repoUrl, files: []}
+    """
+    charts_map: dict[tuple[str, str], list[str]] = {}
+
+    for yaml_file in root.rglob("Chart.yaml"):
+        data = load_yaml_safe(yaml_file)
+        if not data:
+            continue
+
+        dependencies = data.get("dependencies")
+        if not isinstance(dependencies, list):
+            continue
+
+        for dep in dependencies:
+            name = dep.get("name")
+            repo_url = dep.get("repository")
+
+            if name and repo_url:
+                # Skip local dependencies (file:// or alias references)
+                if not repo_url.startswith("http"):
+                    continue
+
+                key = (name, repo_url)
+                if key not in charts_map:
+                    charts_map[key] = []
+                charts_map[key].append(str(yaml_file.relative_to(root)))
+
+    # Convert to list format
+    result = []
+    for (name, repo_url), files in charts_map.items():
+        result.append({
+            "name": name,
+            "repoUrl": repo_url,
+            "files": sorted(files)
+        })
+
+    return sorted(result, key=lambda x: x["name"])
+
+
 def parse_image(image_str: str) -> tuple[str, str, str]:
     """
     Parse an image string into (registry, repository, tag).
@@ -274,6 +316,10 @@ def generate_config(root: Path) -> dict:
     kustomize_charts = discover_kustomize_helm_charts(root)
     print(f"  Found {len(kustomize_charts)} unique Helm charts in kustomization files")
 
+    print("\nDiscovering Chart.yaml dependencies...")
+    chart_deps = discover_chart_dependencies(root)
+    print(f"  Found {len(chart_deps)} unique Helm charts in Chart.yaml dependencies")
+
     print("\nDiscovering Docker images...")
     docker_images = discover_docker_images(root)
     print(f"  Found {len(docker_images)} unique Docker images")
@@ -285,6 +331,9 @@ def generate_config(root: Path) -> dict:
 
     if kustomize_charts:
         config["kustomizeHelmCharts"] = kustomize_charts
+
+    if chart_deps:
+        config["chartDependencies"] = chart_deps
 
     if docker_images:
         config["dockerImages"] = docker_images
@@ -305,10 +354,10 @@ def merge_configs(existing: dict, discovered: dict) -> dict:
     if ignore_config:
         merged["ignore"] = ignore_config
 
-    ignored_count = {"argoApps": 0, "kustomizeHelmCharts": 0, "dockerImages": 0}
+    ignored_count = {"argoApps": 0, "kustomizeHelmCharts": 0, "chartDependencies": 0, "dockerImages": 0}
 
     # For each section, we'll use discovered as base but preserve manual entries
-    for section in ["argoApps", "kustomizeHelmCharts", "dockerImages"]:
+    for section in ["argoApps", "kustomizeHelmCharts", "chartDependencies", "dockerImages"]:
         existing_items = existing.get(section, [])
         discovered_items = discovered.get(section, [])
 
@@ -339,6 +388,25 @@ def merge_configs(existing: dict, discovered: dict) -> dict:
                 if ignored:
                     ignored_count[section] += 1
                     print(f"  [SKIP] Kustomize Helm Chart {item['name']}: {reason}")
+                else:
+                    filtered_discovered.append(item)
+
+            # Key by (name, repoUrl)
+            existing_map = {(item["name"], item["repoUrl"]): item for item in existing_items}
+            discovered_map = {(item["name"], item["repoUrl"]): item for item in filtered_discovered}
+
+            # Merge
+            merged_map = {**discovered_map, **existing_map}
+            merged[section] = sorted(merged_map.values(), key=lambda x: x["name"])
+
+        elif section == "chartDependencies":
+            # Filter discovered items based on ignore rules
+            filtered_discovered = []
+            for item in discovered_items:
+                ignored, reason = should_ignore_helm_chart(item["name"], ignore_config)
+                if ignored:
+                    ignored_count[section] += 1
+                    print(f"  [SKIP] Chart.yaml dependency {item['name']}: {reason}")
                 else:
                     filtered_discovered.append(item)
 
@@ -408,6 +476,7 @@ def main():
     print(f"\nSummary:")
     print(f"  - Argo CD Applications: {len(final_config.get('argoApps', []))}")
     print(f"  - Kustomize Helm Charts: {len(final_config.get('kustomizeHelmCharts', []))}")
+    print(f"  - Chart.yaml Dependencies: {len(final_config.get('chartDependencies', []))}")
     print(f"  - Docker Images: {len(final_config.get('dockerImages', []))}")
 
     return 0

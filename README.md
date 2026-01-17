@@ -286,14 +286,14 @@ Test without making changes:
 
 ### Performance: Using GitHub Actions Cache
 
-**Highly Recommended!** Add caching to dramatically improve performance (7-10x speedup, 40x for fully cached runs):
+**Highly Recommended!** Add caching to persist registry API responses between workflow runs (7-10x speedup, 40x for fully cached runs):
 
 ```yaml
 steps:
   - name: Checkout repository
     uses: actions/checkout@v4
 
-  # Add this cache step BEFORE the updater action
+  # This step RESTORES .registry_cache/ from previous workflow runs
   - name: Cache registry API responses
     uses: actions/cache@v4
     with:
@@ -303,27 +303,35 @@ steps:
         registry-cache-${{ hashFiles('.update-config.yaml') }}-
         registry-cache-
 
+  # This step uses the restored cache and updates it with new API responses
   - name: Update versions
     uses: drumandbytes/argocd-gitops-updater-action@v1
     with:
       config-path: '.update-config.yaml'
       create-pr: true
+
+  # GitHub Actions automatically SAVES .registry_cache/ at the end of the workflow
 ```
 
 **How it works:**
-- The action caches HTTP responses from Docker Hub, ghcr.io, etc. in `.registry_cache/`
-- Without GitHub Actions cache: This directory is lost after each workflow run
-- With GitHub Actions cache: The directory persists between runs for 7 days
-- **Cache key strategy:**
-  - Primary key includes config file hash and run number
-  - Restore-keys allow using previous cache even if config changed
-- **Result:** Registry API calls are cached for 6 hours, dramatically reducing requests
 
-**Cache benefits:**
-- **First run:** Normal speed (no cache)
-- **Second run (same day):** 40x faster (fully cached)
-- **Second run (next day):** 7-10x faster (partial cache, 6-hour expiration)
-- **Avoids rate limits:** Fewer API calls to Docker Hub and other registries
+1. **Cache step (RESTORE):** `actions/cache@v4` restores `.registry_cache/` directory from a previous workflow run (if it exists)
+2. **Action runs:** The updater script reads cached API responses from `.registry_cache/` and writes new responses to the same directory
+3. **Automatic save (POST-RUN):** GitHub Actions automatically saves the `.registry_cache/` directory when the workflow completes for use in future runs
+
+**Cache persistence:**
+- Without GitHub Actions cache: `.registry_cache/` is lost after each workflow run (ephemeral runners)
+- With GitHub Actions cache: `.registry_cache/` persists between runs for up to 7 days
+- **Cache key strategy:**
+  - Primary key includes config file hash and run number (unique per run)
+  - Restore-keys allow using previous cache even if config changed or from earlier runs
+- **Script-level caching:** The Python script caches HTTP responses for 6 hours using SQLite
+
+**Performance benefits:**
+- **First run:** Normal speed (no cache, ~20-30s for 10 images)
+- **Second run (same day):** 40x faster (~0.5s, fully cached within 6-hour window)
+- **Second run (next day):** 7-10x faster (~3-5s, partial cache after 6-hour expiration)
+- **Rate limit protection:** Dramatically fewer API calls to Docker Hub and other registries
 
 ## 🔐 Authentication Setup
 
@@ -387,8 +395,27 @@ The action automatically uses `${{ github.token }}` for ghcr.io authentication. 
 
 ### Slack
 
-Create webhook at: https://api.slack.com/messaging/webhooks
+**Setup steps:**
 
+1. **Create a Slack workspace** (if needed): https://slack.com/create
+2. **Create a channel** (or use existing like #general)
+3. **Create Incoming Webhook**:
+   - Go to https://api.slack.com/messaging/webhooks
+   - Click "Create your Slack app" → "From scratch"
+   - Name your app (e.g., "Version Updater")
+   - Select your workspace
+   - Click "Incoming Webhooks" → Toggle "Activate Incoming Webhooks" to ON
+   - Click "Add New Webhook to Workspace"
+   - Select the channel where notifications will be posted
+   - Click "Allow"
+   - Copy the webhook URL (starts with `https://hooks.slack.com/services/...`)
+
+4. **Add to GitHub Secrets**:
+   - GitHub repo → Settings → Secrets and variables → Actions
+   - New repository secret: `SLACK_WEBHOOK_URL`
+   - Paste the webhook URL
+
+5. **Use in workflow**:
 ```yaml
 notification-method: slack
 slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -396,17 +423,81 @@ slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
 
 ### Microsoft Teams
 
-Create webhook in Teams channel settings:
+**Setup steps:**
 
+1. **Create a Team** (if you don't have one):
+   - Open Microsoft Teams (web: https://teams.microsoft.com or desktop app)
+   - Click "Teams" in the left sidebar
+   - Click "Join or create a team" → "Create team"
+   - Choose "From scratch" → "Public" or "Private"
+   - Name it (e.g., "GitOps Notifications" or "Test Team")
+
+2. **Create a Channel** (optional, or use "General" channel):
+   - In your team, click "..." → "Add channel"
+   - Name it (e.g., "version-updates")
+
+3. **Create Incoming Webhook**:
+   - Go to your channel (e.g., "General" or "version-updates")
+   - Click "..." (three dots) next to the channel name
+   - Select "Connectors" or "Workflows" (depends on Teams version)
+
+   **For new Teams (Workflows):**
+   - Search for "Incoming Webhook"
+   - Click "Add" → "Add to a team"
+   - Select your channel → Configure
+   - Give it a name (e.g., "Version Updater")
+   - Copy the webhook URL
+
+   **For classic Teams (Connectors):**
+   - Click "..." → "Connectors"
+   - Search for "Incoming Webhook" → Configure
+   - Give it a name (e.g., "Version Updater")
+   - Upload an icon (optional)
+   - Click "Create" → Copy the webhook URL
+
+4. **Add to GitHub Secrets**:
+   - Go to your GitHub repo → Settings → Secrets and variables → Actions
+   - Click "New repository secret"
+   - Name: `TEAMS_WEBHOOK_URL`
+   - Value: Paste the webhook URL
+   - Click "Add secret"
+
+5. **Use in workflow**:
 ```yaml
 notification-method: microsoft-teams
 teams-webhook-url: ${{ secrets.TEAMS_WEBHOOK_URL }}
 ```
 
+**Note:** If you see Skype data in Teams, that's normal - Teams replaced Skype for Business. You can create new teams/channels separate from your Skype history.
+
 ### Discord
 
-Create webhook in channel settings → Integrations:
+**Setup steps:**
 
+1. **Create a Discord server** (if needed):
+   - Open Discord (web: https://discord.com or desktop app)
+   - Click "+" → "Create My Own" → Choose template or "Skip"
+   - Name your server (e.g., "GitOps Notifications")
+
+2. **Create a channel** (or use existing like #general):
+   - Click "+" next to "Text Channels"
+   - Name it (e.g., "version-updates")
+
+3. **Create Webhook**:
+   - Right-click on the channel → "Edit Channel"
+   - Go to "Integrations" → "Webhooks" (or "Create Webhook")
+   - Click "New Webhook" or "Create Webhook"
+   - Give it a name (e.g., "Version Updater")
+   - Upload an avatar (optional)
+   - Click "Copy Webhook URL"
+   - Click "Save Changes"
+
+4. **Add to GitHub Secrets**:
+   - GitHub repo → Settings → Secrets and variables → Actions
+   - New repository secret: `DISCORD_WEBHOOK_URL`
+   - Paste the webhook URL
+
+5. **Use in workflow**:
 ```yaml
 notification-method: discord
 discord-webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -414,10 +505,37 @@ discord-webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
 ### Telegram
 
-1. Create bot with @BotFather
-2. Get chat ID from @userinfobot
-3. Configure:
+**Setup steps:**
 
+1. **Create a bot**:
+   - Open Telegram and search for `@BotFather`
+   - Start a chat and send `/newbot`
+   - Follow the prompts to choose a name and username for your bot
+   - Copy the **bot token** (looks like `123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`)
+
+2. **Get your chat ID**:
+   - **Option A - Personal chat:**
+     - Search for `@userinfobot` in Telegram
+     - Start a chat and send any message
+     - It will reply with your chat ID (a number like `123456789`)
+
+   - **Option B - Group chat:**
+     - Create a group and add your bot as a member
+     - Add `@userinfobot` to the group temporarily
+     - Send a message to the group
+     - `@userinfobot` will reply with the group chat ID (negative number like `-987654321`)
+     - Remove `@userinfobot` from the group
+
+3. **Test the bot** (optional):
+   - Start a chat with your bot (search for the username you created)
+   - Send `/start` to initiate the conversation
+
+4. **Add to GitHub Secrets**:
+   - GitHub repo → Settings → Secrets and variables → Actions
+   - New repository secret: `TELEGRAM_BOT_TOKEN` (paste the token from step 1)
+   - New repository secret: `TELEGRAM_CHAT_ID` (paste the chat ID from step 2)
+
+5. **Use in workflow**:
 ```yaml
 notification-method: telegram
 telegram-bot-token: ${{ secrets.TELEGRAM_BOT_TOKEN }}

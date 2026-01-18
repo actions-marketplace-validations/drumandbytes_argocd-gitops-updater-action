@@ -300,6 +300,16 @@ runs:
           python "${{ github.action_path }}/.github/scripts/update-versions.py"
         fi
 
+    - name: Clean up cache before checking changes
+      if: steps.discovery-pr.outputs.pull-request-number == ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # Remove cache directory before checking for changes
+        # (it shouldn't count as a change since it's temporary)
+        rm -rf .registry_cache/
+        echo "Cleaned up cache directory"
+
     - name: Check for changes
       id: check-changes
       if: steps.discovery-pr.outputs.pull-request-number == ''
@@ -333,7 +343,7 @@ runs:
           echo "report=(No detailed update report was generated.)" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Clean up temporary files before commit
+    - name: Clean up report files before commit
       if: steps.discovery-pr.outputs.pull-request-number == ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -342,9 +352,7 @@ runs:
         rm -f .update-report.txt
         rm -f .update-config.yaml.report
         rm -f *.report
-        # Remove cache directory - it should be managed by GitHub Actions cache, not committed
-        rm -rf .registry_cache/
-        echo "Cleaned up temporary files and cache directory (not committed to PR)"
+        echo "Cleaned up report files (not committed to PR)"
 
     - name: Create Pull Request
       id: create-pr

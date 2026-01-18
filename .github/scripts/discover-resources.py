@@ -13,7 +13,7 @@ import yaml
 def load_yaml_safe(path: Path) -> dict | None:
     """Load YAML file, return None if it fails or isn't valid YAML."""
     try:
-        with path.open("r") as f:
+        with path.open("r", encoding="utf-8") as f:
             return yaml.safe_load(f)
     except Exception:
         return None
@@ -459,7 +459,7 @@ def main():
     # Load existing config if it exists
     if config_path.exists():
         print(f"\nMerging with existing configuration at {config_path}...")
-        with config_path.open("r") as f:
+        with config_path.open("r", encoding="utf-8") as f:
             existing = yaml.safe_load(f) or {}
 
         final_config = merge_configs(existing, discovered)
@@ -469,7 +469,7 @@ def main():
 
     # Write the config
     print(f"\nWriting configuration to {config_path}...")
-    with config_path.open("w") as f:
+    with config_path.open("w", encoding="utf-8") as f:
         yaml.dump(final_config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
 
     print("\n✅ Configuration updated successfully!")

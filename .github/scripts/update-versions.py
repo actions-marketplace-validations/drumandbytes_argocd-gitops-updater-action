@@ -46,7 +46,7 @@ REGISTRY_SEMAPHORES = {
 
 
 def load_yaml(path: Path):
-    with path.open("r") as f:
+    with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -225,12 +225,12 @@ def update_argo_app_chart(file_path: Path, chart_name: str, latest_version: str,
 
     # Thread-safe file write
     with FILE_WRITE_LOCK:
-        text = file_path.read_text()
+        text = file_path.read_text(encoding="utf-8")
         new_text, count = replace_yaml_scalar(text, "targetRevision", current, latest_version)
         if count == 0:
             print(f"  [WARN] Could not replace targetRevision in {file_path} (no matching line), skipping write")
             return False, None, None
-        file_path.write_text(new_text)
+        file_path.write_text(new_text, encoding="utf-8")
 
     return True, current, latest_version
 
@@ -280,12 +280,12 @@ def update_kustomize_helm_chart(file_path: Path, chart_name: str, latest_version
 
     # Thread-safe file write
     with FILE_WRITE_LOCK:
-        text = file_path.read_text()
+        text = file_path.read_text(encoding="utf-8")
         new_text, count = replace_yaml_scalar(text, "version", target_current, latest_version)
         if count == 0:
             print(f"  [WARN] Could not find 'version: {target_current}' in {file_path} for chart {chart_name}")
             return False, None, None
-        file_path.write_text(new_text)
+        file_path.write_text(new_text, encoding="utf-8")
 
     return True, target_current, latest_version
 
@@ -335,12 +335,12 @@ def update_chart_yaml(file_path: Path, chart_name: str, latest_version: str, dry
 
     # Thread-safe file write
     with FILE_WRITE_LOCK:
-        text = file_path.read_text()
+        text = file_path.read_text(encoding="utf-8")
         new_text, count = replace_yaml_scalar(text, "version", target_current, latest_version)
         if count == 0:
             print(f"  [WARN] Could not find 'version: {target_current}' in {file_path} for chart {chart_name}")
             return False, None, None
-        file_path.write_text(new_text)
+        file_path.write_text(new_text, encoding="utf-8")
 
     return True, target_current, latest_version
 
@@ -663,58 +663,25 @@ def list_ghcr_tags(repository: str) -> list[str]:
     List tags from GitHub Container Registry (ghcr.io).
 
     Uses Docker Registry HTTP API V2 with token authentication.
+    For public images, works without authentication.
+    For private images or higher rate limits, set GITHUB_TOKEN environment variable.
 
-    Note: ghcr.io requires authentication even for public packages.
-    Set GITHUB_TOKEN environment variable to enable ghcr.io support.
+    Note: GITHUB_TOKEN must be base64 encoded for ghcr.io authentication.
     """
     import os
-    import re
+    import base64
 
     url = f"https://ghcr.io/v2/{repository}/tags/list"
-
-    # Check for GitHub token
     github_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if not github_token:
-        print(f"  [WARN] ghcr.io requires authentication. Set GITHUB_TOKEN environment variable.")
-        return []
+
+    headers = {}
+    if github_token:
+        # ghcr.io requires base64-encoded GITHUB_TOKEN
+        encoded_token = base64.b64encode(github_token.encode()).decode()
+        headers["Authorization"] = f"Bearer {encoded_token}"
 
     try:
-        # Step 1: Try unauthenticated request to get WWW-Authenticate header
-        resp = CACHE_SESSION.get(url, timeout=10)
-
-        if resp.status_code == 401:
-            # Step 2: Parse WWW-Authenticate header to get token endpoint
-            auth_header = resp.headers.get("WWW-Authenticate", "")
-            # Example: Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:user/repo:pull"
-
-            realm_match = re.search(r'realm="([^"]+)"', auth_header)
-            service_match = re.search(r'service="([^"]+)"', auth_header)
-            scope_match = re.search(r'scope="([^"]+)"', auth_header)
-
-            if realm_match and service_match and scope_match:
-                realm = realm_match.group(1)
-                service = service_match.group(1)
-                scope = scope_match.group(1)
-
-                # Step 3: Get token from authentication endpoint
-                token_url = f"{realm}?service={service}&scope={scope}"
-                token_resp = CACHE_SESSION.get(
-                    token_url,
-                    auth=(github_token, ""),  # GitHub token as username, empty password
-                    timeout=10
-                )
-                token_resp.raise_for_status()
-                token_data = token_resp.json()
-                access_token = token_data.get("token")
-
-                if not access_token:
-                    print(f"  [WARN] Failed to get access token for {repository}")
-                    return []
-
-                # Step 4: Retry with access token
-                headers = {"Authorization": f"Bearer {access_token}"}
-                resp = CACHE_SESSION.get(url, headers=headers, timeout=10)
-
+        resp = CACHE_SESSION.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         return data.get("tags", [])
@@ -943,12 +910,12 @@ def update_single_docker_image(entry, ignore_config, dry_run: bool):
 
     # Thread-safe file write
     with FILE_WRITE_LOCK:
-        text = file_path.read_text()
+        text = file_path.read_text(encoding="utf-8")
         new_text, count = replace_yaml_scalar(text, "image", image_str, new_image)
         if count == 0:
             print(f"  [WARN] Could not replace image '{image_str}' in {file_path}")
             return False, None, None, major_available
-        file_path.write_text(new_text)
+        file_path.write_text(new_text, encoding="utf-8")
 
     return True, image_str, new_image, major_available
 
@@ -1045,7 +1012,7 @@ def write_report(helm_changes, docker_changes, major_updates):
             )
         lines.append("")
 
-    REPORT_PATH.write_text("\n".join(lines))
+    REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
 
 
 # ----------------- MAIN -----------------

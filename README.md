@@ -325,10 +325,10 @@ steps:
 4. **Automatic save (POST-RUN):** GitHub Actions automatically saves the `.registry_cache/` directory when the workflow completes for use in future runs
 
 **Important notes:**
-- ✅ The cache is **managed entirely by GitHub Actions** and stored in GitHub's cache storage
+- ⚠️ **You must add the cache step above** to your workflow - it's not automatic!
 - ✅ The cache is **never committed** to your repository (automatically cleaned up before PR creation)
-- ✅ No need to add `.registry_cache/` to your `.gitignore` (the action handles cleanup)
-- ✅ Cache persists for up to 7 days between workflow runs
+- ✅ With the cache step: Cache persists for up to 7 days between workflow runs in GitHub's cache storage
+- ✅ Without the cache step: Cache is lost after each run (but action still works, just slower)
 
 **Cache persistence:**
 - **Without GitHub Actions cache:** `.registry_cache/` is lost after each workflow run (ephemeral runners)

@@ -180,7 +180,14 @@ def get_latest_helm_chart_version(repo_url, chart_name):
     index_url = repo_url.rstrip("/") + "/index.yaml"
     resp = CACHE_SESSION.get(index_url, timeout=10)
     resp.raise_for_status()
-    index = yaml.safe_load(resp.text)
+
+    # Decode response with UTF-8 encoding, replacing bad characters
+    try:
+        content = resp.content.decode('utf-8', errors='replace')
+    except Exception:
+        content = resp.text
+
+    index = yaml.safe_load(content)
     entries = index.get("entries", {}).get(chart_name, [])
     versions = [e["version"] for e in entries if "version" in e]
     return latest_semver(versions)
@@ -819,6 +826,22 @@ def find_best_tags_for_same_major(registry: str, repository: str, current_tag: s
         all_versions.append((v, t))
         if v.major == current_ver.major:
             same_major.append((v, t))
+
+    # Only fall back to non-variant tags if NO tags found with variant
+    # (indicates variant detection might be wrong)
+    if not all_versions and current_variant:
+        print(f"  [INFO] No tags found with variant '{current_variant}', retrying without variant filter...")
+        all_versions = []
+        same_major = []
+        for t in tags:
+            if not is_tag_candidate(t, required_variant=None):
+                continue
+            v = parse_semver_from_tag(t)
+            if v is None:
+                continue
+            all_versions.append((v, t))
+            if v.major == current_ver.major:
+                same_major.append((v, t))
 
     if not all_versions:
         variant_note = f" with variant '{current_variant}'" if current_variant else ""

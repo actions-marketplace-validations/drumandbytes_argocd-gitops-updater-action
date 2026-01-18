@@ -185,9 +185,10 @@ runs:
           echo "Using configured base branch: ${{ inputs.pr-base }}"
         fi
 
-    - name: Cache registry API responses
+    - name: Restore registry cache
+      id: cache-restore
       if: inputs.cache == 'true'
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: ${{ inputs.working-directory }}/.registry_cache
         key: registry-cache-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config-path)) }}-${{ github.run_number }}
@@ -300,14 +301,30 @@ runs:
           python "${{ github.action_path }}/.github/scripts/update-versions.py"
         fi
 
+    - name: Save registry cache
+      if: inputs.cache == 'true' && steps.discovery-pr.outputs.pull-request-number == ''
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ inputs.working-directory }}/.registry_cache
+        key: registry-cache-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config-path)) }}-${{ github.run_number }}
+
+    - name: Clean up cache before checking changes
+      if: steps.discovery-pr.outputs.pull-request-number == ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        # Remove cache directory so it doesn't trigger false positive change detection
+        # (it's already been saved to GitHub Actions cache in the previous step)
+        rm -rf .registry_cache/
+        echo "Cleaned up cache directory (already saved to GitHub Actions cache)"
+
     - name: Check for changes
       id: check-changes
       if: steps.discovery-pr.outputs.pull-request-number == ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        # Check for changes, but exclude .registry_cache (it's ephemeral and in .gitignore)
-        if git diff --quiet -- . ':!.registry_cache'; then
+        if git diff --quiet; then
           echo "changes=false" >> $GITHUB_OUTPUT
           echo "No changes detected"
         else

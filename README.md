@@ -1,6 +1,6 @@
 # ArgoCD GitOps Updater Action
 
-[![GitHub marketplace](https://img.shields.io/badge/marketplace-argocd--gitops--updater--action-blue?logo=github)](https://github.com/marketplace/actions/argocd-gitops-updater-action)
+[![GitHub marketplace](https://img.shields.io/badge/marketplace-container-helm-version-updater-blue?logo=github)](https://github.com/marketplace/actions/container-helm-version-updater)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > GitHub Action for automated Helm chart and Docker image version updates. GitOps-friendly with ArgoCD/Kustomize support, auto-discovery, semantic versioning, and notifications (Slack/Teams/Discord/Telegram)

@@ -662,29 +662,59 @@ def list_ghcr_tags(repository: str) -> list[str]:
     """
     List tags from GitHub Container Registry (ghcr.io).
 
-    Uses Docker Registry HTTP API V2.
+    Uses Docker Registry HTTP API V2 with token authentication.
 
     Note: ghcr.io requires authentication even for public packages.
     Set GITHUB_TOKEN environment variable to enable ghcr.io support.
     """
     import os
+    import re
 
     url = f"https://ghcr.io/v2/{repository}/tags/list"
-    headers = {}
 
     # Check for GitHub token
     github_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if github_token:
-        headers["Authorization"] = f"Bearer {github_token}"
+    if not github_token:
+        print(f"  [WARN] ghcr.io requires authentication. Set GITHUB_TOKEN environment variable.")
+        return []
 
     try:
-        resp = CACHE_SESSION.get(url, headers=headers, timeout=10)
+        # Step 1: Try unauthenticated request to get WWW-Authenticate header
+        resp = CACHE_SESSION.get(url, timeout=10)
+
         if resp.status_code == 401:
-            if not github_token:
-                print(f"  [WARN] ghcr.io requires authentication. Set GITHUB_TOKEN environment variable.")
-            else:
-                print(f"  [WARN] ghcr.io authentication failed for {repository}")
-            return []
+            # Step 2: Parse WWW-Authenticate header to get token endpoint
+            auth_header = resp.headers.get("WWW-Authenticate", "")
+            # Example: Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:user/repo:pull"
+
+            realm_match = re.search(r'realm="([^"]+)"', auth_header)
+            service_match = re.search(r'service="([^"]+)"', auth_header)
+            scope_match = re.search(r'scope="([^"]+)"', auth_header)
+
+            if realm_match and service_match and scope_match:
+                realm = realm_match.group(1)
+                service = service_match.group(1)
+                scope = scope_match.group(1)
+
+                # Step 3: Get token from authentication endpoint
+                token_url = f"{realm}?service={service}&scope={scope}"
+                token_resp = CACHE_SESSION.get(
+                    token_url,
+                    auth=(github_token, ""),  # GitHub token as username, empty password
+                    timeout=10
+                )
+                token_resp.raise_for_status()
+                token_data = token_resp.json()
+                access_token = token_data.get("token")
+
+                if not access_token:
+                    print(f"  [WARN] Failed to get access token for {repository}")
+                    return []
+
+                # Step 4: Retry with access token
+                headers = {"Authorization": f"Bearer {access_token}"}
+                resp = CACHE_SESSION.get(url, headers=headers, timeout=10)
+
         resp.raise_for_status()
         data = resp.json()
         return data.get("tags", [])

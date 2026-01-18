@@ -1089,8 +1089,13 @@ def main():
 
     # Show cache info
     if CACHE_SESSION.cache:
-        cache_info = CACHE_SESSION.cache.responses.count()
-        print(f"Cache initialized: {cache_info} cached entries")
+        try:
+            # Try to get cache size (works for SQLite backend)
+            cache_info = CACHE_SESSION.cache.responses.count()
+            print(f"Cache initialized: {cache_info} cached entries")
+        except (AttributeError, TypeError):
+            # Filesystem backend doesn't have count(), just confirm it exists
+            print(f"Cache initialized: filesystem backend at .registry_cache/")
 
     if ignore_config:
         print("Ignore rules loaded:")

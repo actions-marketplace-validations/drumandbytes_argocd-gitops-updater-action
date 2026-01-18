@@ -308,8 +308,8 @@ That's it! Just add `cache: true` and the action handles everything automaticall
 
 1. **Cache restore:** When enabled, the action automatically restores `.registry_cache/` from previous workflow runs
 2. **Action runs:** The updater script reads cached API responses and writes new responses to `.registry_cache/`
-3. **Automatic cleanup:** The cache directory is automatically removed before creating PRs (never committed to your repository)
-4. **Cache save:** GitHub Actions automatically saves the cache when the workflow completes
+3. **Cache save:** The action explicitly saves `.registry_cache/` to GitHub Actions cache storage
+4. **Automatic cleanup:** The cache directory is removed before change detection (never committed to your repository)
 
 **Cache behavior:**
 - **With `cache: true`:** Cache persists for up to 7 days between workflow runs in GitHub's cache storage

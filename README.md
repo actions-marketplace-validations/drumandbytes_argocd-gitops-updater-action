@@ -242,25 +242,29 @@ Test without making changes:
     dry-run: true
 ```
 
-### Multiple Notification Channels
+### Notifications with Built-in Support
+
+**Recommended:** Use the action's built-in notification support for Slack, Discord, Microsoft Teams, or Telegram:
 
 ```yaml
 - uses: drumandbytes/argocd-gitops-updater-action@v1
   with:
     config-path: '.update-config.yaml'
     create-pr: true
-
-# Send Slack notification
-- name: Notify Slack
-  if: steps.update.outputs.changes-detected == 'true'
-  uses: slackapi/slack-github-action@v1
-  with:
-    webhook: ${{ secrets.SLACK_WEBHOOK }}
-    payload: |
-      {
-        "text": "Version updates available: ${{ steps.update.outputs.pr-url }}"
-      }
+    # Built-in notification support - automatically sends formatted updates
+    notification-method: slack
+    slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
 ```
+
+**Benefits of built-in notifications:**
+- ✅ Automatically formatted with update details
+- ✅ Includes PR links, operation status, and update summary
+- ✅ No additional workflow steps needed
+- ✅ Consistent formatting across all notification platforms
+
+**Supported methods:** `slack`, `discord`, `microsoft-teams`, `telegram`, or `none`
+
+See [Notification Examples](#-notification-examples) section below for detailed setup instructions for each platform.
 
 ### Using Outputs
 
@@ -317,11 +321,18 @@ steps:
 
 1. **Cache step (RESTORE):** `actions/cache@v4` restores `.registry_cache/` directory from a previous workflow run (if it exists)
 2. **Action runs:** The updater script reads cached API responses from `.registry_cache/` and writes new responses to the same directory
-3. **Automatic save (POST-RUN):** GitHub Actions automatically saves the `.registry_cache/` directory when the workflow completes for use in future runs
+3. **Automatic cleanup:** The action automatically removes `.registry_cache/` before creating PRs (it's never committed to your repository)
+4. **Automatic save (POST-RUN):** GitHub Actions automatically saves the `.registry_cache/` directory when the workflow completes for use in future runs
+
+**Important notes:**
+- ✅ The cache is **managed entirely by GitHub Actions** and stored in GitHub's cache storage
+- ✅ The cache is **never committed** to your repository (automatically cleaned up before PR creation)
+- ✅ No need to add `.registry_cache/` to your `.gitignore` (the action handles cleanup)
+- ✅ Cache persists for up to 7 days between workflow runs
 
 **Cache persistence:**
-- Without GitHub Actions cache: `.registry_cache/` is lost after each workflow run (ephemeral runners)
-- With GitHub Actions cache: `.registry_cache/` persists between runs for up to 7 days
+- **Without GitHub Actions cache:** `.registry_cache/` is lost after each workflow run (ephemeral runners)
+- **With GitHub Actions cache:** `.registry_cache/` persists between runs for up to 7 days in GitHub's cache storage
 - **Cache key strategy:**
   - Primary key includes config file hash and run number (unique per run)
   - Restore-keys allow using previous cache even if config changed or from earlier runs
@@ -392,6 +403,15 @@ The action automatically uses `${{ github.token }}` for ghcr.io authentication. 
 - ✅ Custom registries with standard APIs
 
 ## 📝 Notification Examples
+
+**The action has built-in notification support** - no need to use external notification actions! Simply configure the appropriate webhook URL and notification method in the action inputs.
+
+All notifications automatically include:
+- 📦 Update completion status
+- 🔌 Pull request link and number
+- ⚙️ Operation type (created/updated)
+- 📝 PR title
+- 📋 Detailed update summary
 
 ### Slack
 

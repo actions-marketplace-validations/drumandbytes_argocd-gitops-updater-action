@@ -288,7 +288,7 @@ runs:
           echo "report=(No detailed update report was generated.)" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Clean up report files before commit
+    - name: Clean up temporary files before commit
       if: steps.discovery-pr.outputs.pull-request-number == ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -297,7 +297,9 @@ runs:
         rm -f .update-report.txt
         rm -f .update-config.yaml.report
         rm -f *.report
-        echo "Cleaned up report files (captured but not committed)"
+        # Remove cache directory - it should be managed by GitHub Actions cache, not committed
+        rm -rf .registry_cache/
+        echo "Cleaned up temporary files and cache directory (not committed to PR)"
 
     - name: Create Pull Request
       id: create-pr

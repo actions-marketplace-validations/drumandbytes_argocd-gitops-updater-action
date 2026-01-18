@@ -103,7 +103,7 @@ inputs:
     default: ${{ github.token }}
 
   cache:
-    description: 'Enable registry API response caching (recommended for performance, 7-10x speedup)'
+    description: 'Enable registry API response caching (recommended for performance, 5-10x speedup)'
     required: false
     default: 'false'
 

@@ -13,7 +13,7 @@ Automatically keep your GitOps repositories up-to-date by checking for new versi
 - 🎯 **Variant Preservation** - Keeps image variants intact (alpine → alpine, slim → slim)
 - 🔍 **Auto-Discovery** - Automatically find Helm charts and Docker images in your repo
 - 📦 **Multi-Registry Support** - Docker Hub, ghcr.io, quay.io, gcr.io, and more
-- 🚀 **Performance Optimized** - Concurrent processing and HTTP caching (7-10x speedup)
+- 🚀 **Performance Optimized** - Concurrent processing and HTTP caching (5-10x speedup with caching enabled)
 - 🔒 **Rate Limit Management** - Per-registry rate limiting with authentication support
 - 📊 **Smart Notifications** - Slack, Microsoft Teams, Discord, Telegram support
 - ⚠️ **Major Version Alerts** - Get notified when major version updates are available
@@ -188,7 +188,7 @@ See [Auto-Discovery Workflow](#auto-discovery-workflow) for a complete example.
 | `dockerhub-username` | Docker Hub username (increases rate limit 100→200 req/6h) | No | - |
 | `dockerhub-token` | Docker Hub access token | No | - |
 | `github-token` | GitHub token for ghcr.io authentication | No | `${{ github.token }}` |
-| `cache` | Enable registry API response caching (7-10x speedup) | No | `false` |
+| `cache` | Enable registry API response caching (5-10x speedup) | No | `false` |
 
 ## 📤 Outputs
 
@@ -292,14 +292,14 @@ See [Notification Examples](#-notification-examples) section below for detailed 
 
 ### Performance: Enable Built-in Caching
 
-**Highly Recommended!** Enable built-in caching to persist registry API responses between workflow runs (7-10x speedup, 40x for fully cached runs):
+**Highly Recommended!** Enable built-in caching to persist registry API responses between workflow runs (5-10x speedup):
 
 ```yaml
 - uses: drumandbytes/argocd-gitops-updater-action@v1
   with:
     config-path: '.update-config.yaml'
     create-pr: true
-    cache: true  # Enable caching for 7-10x performance improvement
+    cache: true  # Enable caching for 5-10x performance improvement
 ```
 
 That's it! Just add `cache: true` and the action handles everything automatically.
@@ -318,9 +318,9 @@ That's it! Just add `cache: true` and the action handles everything automaticall
 - **Script-level caching:** The Python script caches HTTP responses for 6 hours using SQLite
 
 **Performance benefits:**
-- **First run (no cache):** Normal speed (~20-30s for 10 images)
-- **Cached run (same day):** 40x faster (~0.5s, fully cached within 6-hour window)
-- **Cached run (next day):** 7-10x faster (~3-5s, partial cache after 6-hour expiration)
+- **First run (no cache):** ~20-30s for 10 images (mostly HTTP request time)
+- **Fully cached run (same day):** ~2-5s (5-10x faster, within 6-hour cache window)
+- **Partially cached run (next day):** ~8-15s (2-3x faster, some cache expired after 6 hours)
 - **Rate limit protection:** Dramatically fewer API calls to Docker Hub and other registries
 
 **Important notes:**
@@ -376,7 +376,7 @@ The action automatically uses `${{ github.token }}` for ghcr.io authentication. 
 - **Smart Rate Limiting**: Per-registry semaphores prevent API throttling
 - **GitHub Actions Cache**: Persistent cache between workflow runs
 
-**Performance**: Typically 7-10x faster with caching enabled (40x for fully cached runs).
+**Performance**: Typically 5-10x faster with caching enabled.
 
 ## 🎯 Supported Registries
 

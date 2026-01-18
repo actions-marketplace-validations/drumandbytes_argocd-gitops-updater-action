@@ -17,10 +17,11 @@ REPORT_PATH = Path(".update-report.txt")
 
 # Initialize cached session for API calls (expires after 6 hours)
 # Cache directory will be created in .registry_cache/
+# Using filesystem backend for thread-safe concurrent access
 CACHE_SESSION = requests_cache.CachedSession(
     '.registry_cache',
     expire_after=21600,  # 6 hours
-    backend='sqlite',
+    backend='filesystem',
     allowable_methods=['GET'],
     stale_if_error=True  # Use stale cache if API is down
 )
@@ -141,10 +142,22 @@ def should_ignore_helm_chart(name, version, ignore_config):
 
 
 def latest_semver(versions):
+    """
+    Find the latest stable semver version from a list.
+    Filters out alpha, beta, rc, and pre-release versions.
+    """
     valid = []
     for v in versions:
+        v_str = str(v)
+        # Filter out pre-release versions (alpha, beta, rc)
+        v_lower = v_str.lower()
+        if any(marker in v_lower for marker in ['alpha', 'beta', 'rc', '-pre', '.pre']):
+            continue
         try:
-            valid.append((Version(str(v)), str(v)))
+            parsed = Version(v_str)
+            # Also filter out versions marked as pre-release by packaging
+            if not parsed.is_prerelease:
+                valid.append((parsed, v_str))
         except InvalidVersion:
             continue
     if not valid:
@@ -706,7 +719,13 @@ def list_ghcr_tags(repository: str) -> list[str]:
         resp = CACHE_SESSION.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        return data.get("tags", [])
+        tags = data.get("tags", [])
+        if tags:
+            print(f"  [DEBUG] ghcr.io returned {len(tags)} tags for {repository}")
+            # Show a sample of tags for debugging
+            sample = tags[:5] if len(tags) <= 10 else tags[:3] + ['...'] + tags[-2:]
+            print(f"  [DEBUG] Sample tags: {sample}")
+        return tags
     except Exception as e:
         print(f"  [WARN] Failed to fetch ghcr.io tags for {repository}: {e}")
         return []

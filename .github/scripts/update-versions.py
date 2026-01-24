@@ -1219,13 +1219,6 @@ def main():
     dockerhub_token = os.environ.get("DOCKERHUB_TOKEN", "").strip() or os.environ.get("DOCKERHUB_PASSWORD", "").strip()
     dockerhub_authenticated = bool(dockerhub_username and dockerhub_token)
 
-    # Debug: Show what we received (mask token for security)
-    if dockerhub_username:
-        token_preview = f"{dockerhub_token[:4]}..." if dockerhub_token and len(dockerhub_token) > 4 else "<empty>"
-        print(f"  [DEBUG] Docker Hub credentials: username={dockerhub_username}, token={token_preview}")
-    else:
-        print("  [DEBUG] Docker Hub credentials: not provided")
-
     if dockerhub_authenticated:
         print("Docker Hub: Authenticated (200 req/6h rate limit)")
         # Increase Docker Hub concurrency limit when authenticated

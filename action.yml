@@ -107,16 +107,6 @@ inputs:
     required: false
     default: 'false'
 
-  cache-python:
-    description: 'Enable Python dependency caching (uv cache). Speeds up setup by 3-4x on subsequent runs. No files required in your repo. Uses GitHub Actions cache storage.'
-    required: false
-    default: 'false'
-
-  cache-key-suffix:
-    description: 'Optional suffix for cache keys. Use to manually invalidate cache (e.g., "v2", "2024-01-15"). Applies to both registry and Python caches.'
-    required: false
-    default: ''
-
 outputs:
   discovery-changes-detected:
     description: 'Whether auto-discovery found new resources (true/false)'
@@ -168,10 +158,6 @@ runs:
           echo "Error: cache must be 'true' or 'false'"
           exit 1
         fi
-        if [ "${{ inputs.cache-python }}" != "true" ] && [ "${{ inputs.cache-python }}" != "false" ]; then
-          echo "Error: cache-python must be 'true' or 'false'"
-          exit 1
-        fi
 
     - name: Detect default branch
       id: detect-branch
@@ -205,9 +191,9 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ inputs.working-directory }}/.registry_cache
-        key: registry-cache-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config-path)) }}-${{ inputs.cache-key-suffix }}-${{ github.run_number }}
+        key: registry-cache-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config-path)) }}-${{ github.run_number }}
         restore-keys: |
-          registry-cache-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config-path)) }}-${{ inputs.cache-key-suffix }}-
+          registry-cache-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config-path)) }}-
           registry-cache-
 
     - name: Setup Python
@@ -220,21 +206,7 @@ runs:
       with:
         enable-cache: false
 
-    - name: Restore Python dependency cache
-      id: cache-python-restore
-      if: inputs.cache-python == 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          /opt/hostedtoolcache/Python/${{ inputs.python-version }}*/x64/lib/python${{ inputs.python-version }}/site-packages
-          ~/.cache/uv
-        key: python-deps-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles(format('{0}/pyproject.toml', github.action_path)) }}-${{ inputs.cache-key-suffix }}
-        restore-keys: |
-          python-deps-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles(format('{0}/pyproject.toml', github.action_path)) }}-
-          python-deps-${{ runner.os }}-${{ inputs.python-version }}-
-
     - name: Install dependencies
-      if: inputs.cache-python != 'true' || steps.cache-python-restore.outputs.cache-hit != 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
@@ -334,16 +306,7 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: ${{ inputs.working-directory }}/.registry_cache
-        key: registry-cache-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config-path)) }}-${{ inputs.cache-key-suffix }}-${{ github.run_number }}
-
-    - name: Save Python dependency cache
-      if: inputs.cache-python == 'true' && steps.discovery-pr.outputs.pull-request-number == '' && steps.cache-python-restore.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          /opt/hostedtoolcache/Python/${{ inputs.python-version }}*/x64/lib/python${{ inputs.python-version }}/site-packages
-          ~/.cache/uv
-        key: python-deps-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles(format('{0}/pyproject.toml', github.action_path)) }}-${{ inputs.cache-key-suffix }}
+        key: registry-cache-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config-path)) }}-${{ github.run_number }}
 
     - name: Clean up cache before checking changes
       if: steps.discovery-pr.outputs.pull-request-number == ''

@@ -178,7 +178,7 @@ runs:
     - name: Install dependencies
       shell: bash
       run: |
-        pip install requests pyyaml packaging
+        pip install requests requests-cache pyyaml packaging
 
     - name: Auto-discover resources
       if: inputs.auto-discover == 'true'

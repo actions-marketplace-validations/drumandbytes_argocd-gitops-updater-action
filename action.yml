@@ -268,20 +268,14 @@ runs:
         path: ${{ inputs.working-directory }}/.registry_cache
         key: registry-cache-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.config-path)) }}-${{ github.run_number }}
 
-    - name: Clean up cache before checking changes
-      if: steps.discovery-pr.outputs.pull-request-number == ''
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: |
-        rm -rf .registry_cache/
-
     - name: Check for changes
       id: check-changes
       if: steps.discovery-pr.outputs.pull-request-number == ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        if git diff --quiet; then
+        # Exclude cache and report files from diff
+        if git diff --quiet -- . ':(exclude).registry_cache' ':(exclude)*.report' ':(exclude).update-report.txt' ':(exclude).update-config.yaml.report'; then
           echo "changes=false" >> $GITHUB_OUTPUT
           echo "No changes detected"
         else
@@ -307,17 +301,6 @@ runs:
         else
           echo "report=(No detailed update report was generated.)" >> "$GITHUB_OUTPUT"
         fi
-
-    - name: Clean up report files before commit
-      if: steps.discovery-pr.outputs.pull-request-number == ''
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: |
-        # Remove report files so they don't get committed to the PR
-        rm -f .update-report.txt
-        rm -f .update-config.yaml.report
-        rm -f *.report
-        echo "Cleaned up report files (not committed to PR)"
 
     - name: Create Pull Request
       id: create-pr

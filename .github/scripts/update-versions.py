@@ -615,33 +615,19 @@ async def update_helm_charts(session: CachedSession, config: dict, ignore_config
             task = process_chart_dependency(session, item, ignore_config, dry_run)
         tasks.append(task)
 
-    # Process results as they complete (shows progress)
-    import sys
-    completed = 0
-    total = len(tasks)
+    # Gather all results
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    for coro in asyncio.as_completed(tasks):
-        try:
-            result = await coro
-            if isinstance(result, Exception):
-                print(f"  [ERROR] Unexpected error: {result}")
-                sys.stdout.flush()
-            else:
-                files, changes, error = result
-                changed_files.update(files)
-                helm_changes.extend(changes)
-                if error:
-                    print(f"  [ERROR] {error}")
-                    sys.stdout.flush()
-
-            completed += 1
-            if completed % 5 == 0 or completed == total:
-                print(f"  Progress: {completed}/{total} charts processed")
-                sys.stdout.flush()
-        except Exception as e:
-            print(f"  [ERROR] Task failed: {e}")
-            sys.stdout.flush()
-            completed += 1
+    # Process results
+    for result in results:
+        if isinstance(result, Exception):
+            print(f"  [ERROR] Unexpected error: {result}")
+        else:
+            files, changes, error = result
+            changed_files.update(files)
+            helm_changes.extend(changes)
+            if error:
+                print(f"  [ERROR] {error}")
 
     return changed_files, helm_changes
 
@@ -1116,48 +1102,28 @@ async def update_docker_images(session: CachedSession, config: dict, ignore_conf
     if not entries:
         return changed_files, docker_changes, major_updates
 
-    # Process images concurrently with progress tracking
-    import sys
-    tasks = [(entry, update_single_docker_image(session, entry, ignore_config, dry_run)) for entry in entries]
-    completed = 0
-    total = len(tasks)
+    # Process images concurrently using asyncio.gather
+    tasks = [update_single_docker_image(session, entry, ignore_config, dry_run) for entry in entries]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Use as_completed to show progress
-    for entry, coro in tasks:
-        futures = {asyncio.create_task(coro): entry}
-
-    futures_to_entry = {asyncio.create_task(coro): entry for entry, coro in tasks}
-
-    for future in asyncio.as_completed(futures_to_entry.keys()):
-        entry = futures_to_entry[future]
-        try:
-            result = await future
-            if isinstance(result, Exception):
-                print(f"  [ERROR] Failed to process {entry['id']}: {result}")
-                sys.stdout.flush()
-            else:
-                changed, old, new, major_available = result
-                if changed:
-                    changed_files.add(str(entry["file"]))
-                    docker_changes.append(
-                        {
-                            "id": entry["id"],
-                            "file": entry["file"],
-                            "from": old,
-                            "to": new,
-                        }
-                    )
-                if major_available:
-                    major_updates.append(major_available)
-
-            completed += 1
-            if completed % 5 == 0 or completed == total:
-                print(f"  Progress: {completed}/{total} images processed")
-                sys.stdout.flush()
-        except Exception as e:
-            print(f"  [ERROR] Failed to process {entry['id']}: {e}")
-            sys.stdout.flush()
-            completed += 1
+    # Process results
+    for idx, result in enumerate(results):
+        if isinstance(result, Exception):
+            print(f"  [ERROR] Failed to process {entries[idx]['id']}: {result}")
+        else:
+            changed, old, new, major_available = result
+            if changed:
+                changed_files.add(str(entries[idx]["file"]))
+                docker_changes.append(
+                    {
+                        "id": entries[idx]["id"],
+                        "file": entries[idx]["file"],
+                        "from": old,
+                        "to": new,
+                    }
+                )
+            if major_available:
+                major_updates.append(major_available)
 
     return changed_files, docker_changes, major_updates
 
@@ -1271,35 +1237,17 @@ async def async_main():
 
     # Create cached session
     async with CachedSession(cache=CACHE_BACKEND) as session:
-        # Show cache info
         print(f"Cache initialized: SQLite backend at .registry_cache/")
-        sys.stdout.flush()
-
-        # Count total resources
-        total_helm = len(config.get('argoApps', [])) + len(config.get('kustomizeHelmCharts', [])) + len(config.get('chartDependencies', []))
-        total_docker = len(config.get('dockerImages', []))
 
         # Update Helm charts
-        if total_helm > 0:
-            print(f"\n📊 Processing {total_helm} Helm charts...")
-            sys.stdout.flush()
         helm_start = time.time()
         helm_changed_files, helm_changes = await update_helm_charts(session, config, ignore_config, dry_run=dry_run)
         helm_duration = time.time() - helm_start
-        if total_helm > 0:
-            print(f"✅ Helm charts processed in {helm_duration:.2f}s ({len(helm_changes)} updates)")
-            sys.stdout.flush()
 
         # Update Docker images
-        if total_docker > 0:
-            print(f"\n📊 Processing {total_docker} Docker images...")
-            sys.stdout.flush()
         docker_start = time.time()
         docker_changed_files, docker_changes, major_updates = await update_docker_images(session, config, ignore_config, dry_run=dry_run)
         docker_duration = time.time() - docker_start
-        if total_docker > 0:
-            print(f"✅ Docker images processed in {docker_duration:.2f}s ({len(docker_changes)} updates)")
-            sys.stdout.flush()
 
         changed_files |= helm_changed_files
         changed_files |= docker_changed_files

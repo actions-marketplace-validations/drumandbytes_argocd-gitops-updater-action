@@ -188,10 +188,9 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
         DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
-        PYTHONUNBUFFERED: 1
       run: |
         echo "Auto-discovering resources..."
-        python -u "${{ github.action_path }}/.github/scripts/discover-resources.py"
+        python "${{ github.action_path }}/.github/scripts/discover-resources.py"
 
     - name: Check for discovery changes
       id: discovery-changes
@@ -254,13 +253,12 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
         DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
-        PYTHONUNBUFFERED: 1
       run: |
         echo "Running version updater..."
         if [ "$DRY_RUN" = "true" ]; then
-          python -u "${{ github.action_path }}/.github/scripts/update-versions.py" --dry-run
+          python "${{ github.action_path }}/.github/scripts/update-versions.py" --dry-run
         else
-          python -u "${{ github.action_path }}/.github/scripts/update-versions.py"
+          python "${{ github.action_path }}/.github/scripts/update-versions.py"
         fi
 
     - name: Save registry cache

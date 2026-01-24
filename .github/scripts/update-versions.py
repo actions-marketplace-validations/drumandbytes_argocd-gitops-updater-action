@@ -1226,12 +1226,8 @@ async def async_main():
         if ignore_config.get("helmCharts"):
             print(f"  Helm charts: {len(ignore_config.get('helmCharts', []))} rule(s)")
 
-    print(f"Running with dry_run={dry_run}")
-    print(f"Async processing: enabled (asyncio)")
-    print(f"Per-registry rate limiting: Docker Hub ({REGISTRY_LIMITS['dockerhub']} concurrent), "
-          f"ghcr.io ({REGISTRY_LIMITS['ghcr.io']}), "
-          f"quay.io ({REGISTRY_LIMITS['quay.io']}), "
-          f"gcr.io ({REGISTRY_LIMITS['gcr.io']})")
+    if dry_run:
+        print("Running in dry-run mode (no changes will be made)")
 
     changed_files = set()
 

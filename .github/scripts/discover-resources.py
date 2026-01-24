@@ -373,22 +373,38 @@ async def process_k8s_manifest_file(yaml_file: Path, root: Path, resource_types:
 
 async def generate_config(root: Path) -> dict:
     """Generate the full configuration using concurrent discovery."""
-    print("Discovering resources concurrently...")
+    import sys
+
+    print("🔍 Discovering resources concurrently...")
+    sys.stdout.flush()
 
     # Run all discovery tasks concurrently
+    print("  Scanning for Argo CD Applications...")
+    sys.stdout.flush()
     argo_task = discover_argo_apps(root)
+
+    print("  Scanning for Kustomize Helm charts...")
+    sys.stdout.flush()
     kustomize_task = discover_kustomize_helm_charts(root)
+
+    print("  Scanning for Chart.yaml dependencies...")
+    sys.stdout.flush()
     chart_deps_task = discover_chart_dependencies(root)
+
+    print("  Scanning for Docker images...")
+    sys.stdout.flush()
     docker_task = discover_docker_images(root)
 
     argo_apps, kustomize_charts, chart_deps, docker_images = await asyncio.gather(
         argo_task, kustomize_task, chart_deps_task, docker_task
     )
 
-    print(f"  Found {len(argo_apps)} Argo CD Applications with Helm charts")
-    print(f"  Found {len(kustomize_charts)} unique Helm charts in kustomization files")
-    print(f"  Found {len(chart_deps)} unique Helm charts in Chart.yaml dependencies")
-    print(f"  Found {len(docker_images)} unique Docker images")
+    print(f"\n✅ Discovery complete:")
+    print(f"  • {len(argo_apps)} Argo CD Applications with Helm charts")
+    print(f"  • {len(kustomize_charts)} unique Helm charts in kustomization files")
+    print(f"  • {len(chart_deps)} unique Helm charts in Chart.yaml dependencies")
+    print(f"  • {len(docker_images)} unique Docker images")
+    sys.stdout.flush()
 
     config = {}
 
@@ -516,16 +532,20 @@ def merge_configs(existing: dict, discovered: dict) -> dict:
 
 async def async_main():
     """Async main function."""
+    import sys
+
     root = Path.cwd()
     config_path = root / ".update-config.yaml"
 
     print("Auto-discovering resources in the repository...\n")
+    sys.stdout.flush()
 
     discovered = await generate_config(root)
 
     # Load existing config if it exists
     if config_path.exists():
         print(f"\nMerging with existing configuration at {config_path}...")
+        sys.stdout.flush()
         async with aiofiles.open(config_path, "r", encoding="utf-8") as f:
             content = await f.read()
             existing = yaml.safe_load(content) or {}
@@ -533,19 +553,22 @@ async def async_main():
         final_config = merge_configs(existing, discovered)
     else:
         print(f"\nNo existing configuration found, creating new one...")
+        sys.stdout.flush()
         final_config = discovered
 
     # Write the config
-    print(f"\nWriting configuration to {config_path}...")
+    print(f"\n💾 Writing configuration to {config_path}...")
+    sys.stdout.flush()
     async with aiofiles.open(config_path, "w", encoding="utf-8") as f:
         await f.write(yaml.dump(final_config, default_flow_style=False, sort_keys=False, allow_unicode=True))
 
     print("\n✅ Configuration updated successfully!")
-    print(f"\nSummary:")
-    print(f"  - Argo CD Applications: {len(final_config.get('argoApps', []))}")
-    print(f"  - Kustomize Helm Charts: {len(final_config.get('kustomizeHelmCharts', []))}")
-    print(f"  - Chart.yaml Dependencies: {len(final_config.get('chartDependencies', []))}")
-    print(f"  - Docker Images: {len(final_config.get('dockerImages', []))}")
+    print(f"\n📊 Summary:")
+    print(f"  • Argo CD Applications: {len(final_config.get('argoApps', []))}")
+    print(f"  • Kustomize Helm Charts: {len(final_config.get('kustomizeHelmCharts', []))}")
+    print(f"  • Chart.yaml Dependencies: {len(final_config.get('chartDependencies', []))}")
+    print(f"  • Docker Images: {len(final_config.get('dockerImages', []))}")
+    sys.stdout.flush()
 
     return 0
 

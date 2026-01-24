@@ -24,7 +24,6 @@ CACHE_BACKEND = CacheBackend(
     expire_after=21600,  # 6 hours
     allowed_methods=['GET'],
     include_headers=False,  # Don't include headers in cache key (fixes auth caching)
-    ignored_params=['page'],  # Ignore pagination params for better cache reuse
 )
 
 # Async lock for file writes
@@ -1296,6 +1295,22 @@ async def async_main():
 
     config = await load_yaml(CONFIG_PATH)
     ignore_config = config.get("ignore")
+
+    # Clear incompatible cache from previous runs if it exists
+    # The cache format changed when we added include_headers=False
+    cache_dir = Path(".registry_cache")
+    if cache_dir.exists():
+        # Check if this is an old/incompatible cache by looking for a marker file
+        cache_version_file = cache_dir / ".cache_version"
+        expected_version = "v2_no_headers"
+
+        if not cache_version_file.exists() or cache_version_file.read_text().strip() != expected_version:
+            print("Detected incompatible cache format, clearing...")
+            import shutil
+            shutil.rmtree(cache_dir)
+            cache_dir.mkdir()
+            cache_version_file.write_text(expected_version)
+            print("Cache cleared and reinitialized")
 
     # Initialize registry-specific semaphores
     global REGISTRY_SEMAPHORES, HELM_SEMAPHORE

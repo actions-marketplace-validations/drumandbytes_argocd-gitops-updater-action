@@ -38,7 +38,7 @@ inputs:
     default: 'chore/update-versions'
 
   pr-base:
-    description: 'Base branch for the pull request (will be auto-detected from git if not specified)'
+    description: 'Base branch for the pull request'
     required: false
     default: 'main'
 
@@ -159,32 +159,6 @@ runs:
           exit 1
         fi
 
-    - name: Detect default branch
-      id: detect-branch
-      shell: bash
-      run: |
-        # Try to detect the default branch from git
-        if git rev-parse --verify HEAD >/dev/null 2>&1; then
-          # Get the current branch name
-          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          echo "current-branch=$CURRENT_BRANCH" >> "$GITHUB_OUTPUT"
-
-          # Try to get the default branch from remote
-          DEFAULT_BRANCH=$(git remote show origin 2>/dev/null | grep 'HEAD branch' | cut -d' ' -f5 || echo "")
-
-          # If we couldn't detect it, use the user's input or fall back to current branch
-          if [ -z "$DEFAULT_BRANCH" ]; then
-            DEFAULT_BRANCH="${{ inputs.pr-base }}"
-          fi
-
-          echo "default-branch=$DEFAULT_BRANCH" >> "$GITHUB_OUTPUT"
-          echo "Detected default branch: $DEFAULT_BRANCH"
-        else
-          # No git repository, use the input value
-          echo "default-branch=${{ inputs.pr-base }}" >> "$GITHUB_OUTPUT"
-          echo "Using configured base branch: ${{ inputs.pr-base }}"
-        fi
-
     - name: Restore registry cache
       id: cache-restore
       if: inputs.cache == 'true'
@@ -201,24 +175,10 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        enable-cache: false
-
     - name: Install dependencies
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       run: |
-        # Check if pyproject.toml exists in the action directory
-        ACTION_DIR="${{ github.action_path }}"
-        if [ -f "${ACTION_DIR}/pyproject.toml" ]; then
-          echo "Installing dependencies from action pyproject.toml..."
-          uv pip install --system -r <(uv pip compile "${ACTION_DIR}/pyproject.toml")
-        else
-          echo "Installing required dependencies directly..."
-          uv pip install --system requests pyyaml packaging
-        fi
+        pip install requests pyyaml packaging
 
     - name: Auto-discover resources
       if: inputs.auto-discover == 'true'
@@ -272,7 +232,7 @@ runs:
           ---
           *This PR was automatically created by the [Container & Helm Version Updater](https://github.com/${{ github.repository }}) action.*
         branch: "chore/auto-discovery"
-        base: ${{ steps.detect-branch.outputs.default-branch }}
+        base: ${{ inputs.pr-base }}
         delete-branch: true
 
     - name: Stop if discovery PR was created
@@ -377,7 +337,7 @@ runs:
           ---
           *This PR was automatically created by the [Container & Helm Version Updater](https://github.com/${{ github.repository }}) action.*
         branch: ${{ inputs.pr-branch }}
-        base: ${{ steps.detect-branch.outputs.default-branch }}
+        base: ${{ inputs.pr-base }}
         delete-branch: true
 
     - name: Send Telegram notification

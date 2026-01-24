@@ -29,8 +29,8 @@ CACHE_BACKEND = CacheBackend(
 FILE_WRITE_LOCK = asyncio.Lock()
 
 # Helm chart concurrency limit to avoid overwhelming DNS and network
-# Conservative limit since Helm repositories can be slow
-HELM_CONCURRENCY_LIMIT = 5
+# Now that Helm and Docker run in parallel (not sequential), we can increase this
+HELM_CONCURRENCY_LIMIT = 10
 
 # Helm chart semaphore for rate limiting (will be initialized in main)
 HELM_SEMAPHORE: Optional[asyncio.Semaphore] = None
@@ -1284,15 +1284,13 @@ async def async_main():
     async with CachedSession(cache=CACHE_BACKEND, connector=connector) as session:
         print(f"Cache initialized: SQLite backend at .registry_cache/")
 
-        # Update Helm charts
-        helm_start = time.time()
-        helm_changed_files, helm_changes = await update_helm_charts(session, config, ignore_config, dry_run=dry_run)
-        helm_duration = time.time() - helm_start
-
-        # Update Docker images
-        docker_start = time.time()
-        docker_changed_files, docker_changes, major_updates = await update_docker_images(session, config, ignore_config, dry_run=dry_run)
-        docker_duration = time.time() - docker_start
+        # Run Helm and Docker updates in parallel for maximum performance
+        parallel_start = time.time()
+        (helm_changed_files, helm_changes), (docker_changed_files, docker_changes, major_updates) = await asyncio.gather(
+            update_helm_charts(session, config, ignore_config, dry_run=dry_run),
+            update_docker_images(session, config, ignore_config, dry_run=dry_run)
+        )
+        parallel_duration = time.time() - parallel_start
 
         changed_files |= helm_changed_files
         changed_files |= docker_changed_files
@@ -1303,10 +1301,12 @@ async def async_main():
 
     # Performance summary
     total_duration = time.time() - start_time
+    total_helm = len(config.get('argoApps', [])) + len(config.get('kustomizeHelmCharts', [])) + len(config.get('chartDependencies', []))
+    total_docker = len(config.get('dockerImages', []))
     print(f"\n{'='*60}")
     print(f"Performance Summary:")
-    print(f"  Helm charts: {helm_duration:.2f}s ({len(config.get('argoApps', [])) + len(config.get('kustomizeHelmCharts', [])) + len(config.get('chartDependencies', []))} charts)")
-    print(f"  Docker images: {docker_duration:.2f}s ({len(config.get('dockerImages', []))} images)")
+    print(f"  Resources processed in parallel: {total_helm} Helm charts + {total_docker} Docker images")
+    print(f"  Processing time: {parallel_duration:.2f}s")
     print(f"  Total time: {total_duration:.2f}s")
     print(f"{'='*60}")
 

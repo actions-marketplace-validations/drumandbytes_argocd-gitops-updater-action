@@ -55,7 +55,7 @@ inputs:
   python-version:
     description: 'Python version to use'
     required: false
-    default: '3.12'
+    default: '3.14'
 
   notification-method:
     description: 'Notification method: telegram, slack, microsoft-teams, discord, or none'
@@ -139,26 +139,6 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Validate inputs
-      shell: bash
-      run: |
-        if [ "${{ inputs.auto-discover }}" != "true" ] && [ "${{ inputs.auto-discover }}" != "false" ]; then
-          echo "Error: auto-discover must be 'true' or 'false'"
-          exit 1
-        fi
-        if [ "${{ inputs.create-pr }}" != "true" ] && [ "${{ inputs.create-pr }}" != "false" ]; then
-          echo "Error: create-pr must be 'true' or 'false'"
-          exit 1
-        fi
-        if [ "${{ inputs.dry-run }}" != "true" ] && [ "${{ inputs.dry-run }}" != "false" ]; then
-          echo "Error: dry-run must be 'true' or 'false'"
-          exit 1
-        fi
-        if [ "${{ inputs.cache }}" != "true" ] && [ "${{ inputs.cache }}" != "false" ]; then
-          echo "Error: cache must be 'true' or 'false'"
-          exit 1
-        fi
-
     - name: Restore registry cache
       id: cache-restore
       if: inputs.cache == 'true'

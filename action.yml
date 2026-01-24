@@ -304,7 +304,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        rm -f .registry_cache .update-report.txt
+        rm -rf .registry_cache .update-report.txt
 
     - name: Create Pull Request
       id: create-pr

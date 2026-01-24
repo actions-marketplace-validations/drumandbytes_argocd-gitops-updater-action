@@ -23,16 +23,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Cache registry API responses for performance
-      - name: Cache registry API responses
-        uses: actions/cache@v4
-        with:
-          path: .registry_cache
-          key: registry-cache-${{ hashFiles('.update-config.yaml') }}-${{ github.run_number }}
-          restore-keys: |
-            registry-cache-${{ hashFiles('.update-config.yaml') }}-
-            registry-cache-
-
       - name: Update Helm charts and Docker images
         id: update
         uses: drumandbytes/argocd-gitops-updater-action@v1
@@ -40,6 +30,10 @@ jobs:
           config-path: '.update-config.yaml'
           create-pr: true
           dry-run: ${{ github.event.inputs.dry-run || false }}
+
+          # Enable caching for better performance (opt-in)
+          cache: true              # Registry API caching (2-3x speedup)
+          cache-python: true       # Python dependency caching (3-4x faster setup)
 
           # Docker Hub authentication (increases rate limit)
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}

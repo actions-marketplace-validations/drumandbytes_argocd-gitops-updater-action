@@ -45,10 +45,70 @@ REGISTRY_SEMAPHORES = {
     for registry, limit in REGISTRY_LIMITS.items()
 }
 
+# Compiled regex patterns for version normalization (module-level for performance)
+# These patterns convert non-standard version formats to PEP 440 format
+PATTERN_P_SUFFIX = re.compile(r'^v?(\d+\.\d+\.\d+)-p(\d+)$')      # v1.24.1-p1 → 1.24.1.post1
+PATTERN_DEBIAN_REV = re.compile(r'^v?(\d+\.\d+\.\d+)-(\d+)$')    # v1.24.1-2 → 1.24.1.post2
+PATTERN_SIMPLE = re.compile(r'^v?(\d+\.\d+\.\d+)$')              # v1.24.1 → 1.24.1
+
 
 def load_yaml(path: Path):
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def normalize_version_string(tag: str) -> str:
+    """
+    Normalize version tags to PEP 440 format for consistent parsing.
+
+    Handles common non-standard versioning patterns:
+    - Docker image patches: v1.24.1-p1 → 1.24.1.post1 (pgbouncer, custom images)
+    - Debian revisions: v1.24.1-2 → 1.24.1.post2 (Debian/Ubuntu packages)
+    - Simple semver: v1.24.1 → 1.24.1 (strip v prefix)
+    - Variants: 1.24.1-alpine → 1.24.1 (extract core, handled by fallback)
+
+    Args:
+        tag: Version tag string to normalize
+
+    Returns:
+        Normalized version string compatible with PEP 440
+
+    Examples:
+        >>> normalize_version_string("v1.24.1-p1")
+        '1.24.1.post1'
+        >>> normalize_version_string("v1.24.1")
+        '1.24.1'
+        >>> normalize_version_string("1.24.1-alpine")
+        '1.24.1'
+    """
+    # Fast path 1: -pN suffix (Docker image patches like pgbouncer)
+    # Matches: v1.24.1-p1, 1.24.1-p2, etc.
+    m = PATTERN_P_SUFFIX.match(tag)
+    if m:
+        return f'{m.group(1)}.post{m.group(2)}'
+
+    # Fast path 2: -N suffix (Debian package revisions)
+    # Matches: v1.24.1-2, 1.24.1-1, etc. (but not variants like -alpine)
+    m = PATTERN_DEBIAN_REV.match(tag)
+    if m:
+        return f'{m.group(1)}.post{m.group(2)}'
+
+    # Fast path 3: Simple semver (no suffix)
+    # Matches: v1.24.1, 1.24.1, etc.
+    m = PATTERN_SIMPLE.match(tag)
+    if m:
+        return m.group(1)
+
+    # Fallback: extract core for variants (-alpine, -debian, etc.)
+    # This handles tags like 1.24.1-alpine3.19 by extracting just 1.24.1
+    tag = tag.lstrip('v')
+    core = ''
+    for ch in tag:
+        if ch.isdigit() or ch == '.':
+            core += ch
+        else:
+            break
+    return core
 
 
 def retry_on_rate_limit(func, max_retries=3):
@@ -145,6 +205,8 @@ def latest_semver(versions):
     """
     Find the latest stable semver version from a list.
     Filters out alpha, beta, rc, and pre-release versions.
+
+    Normalizes version strings before parsing to handle non-standard formats.
     """
     valid = []
     for v in versions:
@@ -154,7 +216,11 @@ def latest_semver(versions):
         if any(marker in v_lower for marker in ['alpha', 'beta', 'rc', '-pre', '.pre']):
             continue
         try:
-            parsed = Version(v_str)
+            # Normalize version string before parsing
+            normalized = normalize_version_string(v_str)
+            if not normalized:
+                continue
+            parsed = Version(normalized)
             # Also filter out versions marked as pre-release by packaging
             if not parsed.is_prerelease:
                 valid.append((parsed, v_str))
@@ -245,7 +311,10 @@ def update_argo_app_chart(file_path: Path, chart_name: str, latest_version: str,
 
     print(f"  {file_path}: current={current}, latest={latest_version}")
     try:
-        if Version(latest_version) <= Version(current):
+        # Normalize both versions before comparison to handle -pN suffixes, etc.
+        latest_normalized = normalize_version_string(latest_version)
+        current_normalized = normalize_version_string(current)
+        if Version(latest_normalized) <= Version(current_normalized):
             print("  -> up to date")
             return False, None, None
     except InvalidVersion:
@@ -294,7 +363,10 @@ def update_kustomize_helm_chart(file_path: Path, chart_name: str, latest_version
 
         print(f"  {file_path} ({chart_name}): current={current}, latest={latest_version}")
         try:
-            if Version(latest_version) <= Version(current):
+            # Normalize both versions before comparison to handle -pN suffixes, etc.
+            latest_normalized = normalize_version_string(latest_version)
+            current_normalized = normalize_version_string(current)
+            if Version(latest_normalized) <= Version(current_normalized):
                 print("  -> up to date")
                 continue
         except InvalidVersion:
@@ -349,7 +421,10 @@ def update_chart_yaml(file_path: Path, chart_name: str, latest_version: str, dry
 
         print(f"  {file_path} ({chart_name}): current={current}, latest={latest_version}")
         try:
-            if Version(latest_version) <= Version(current):
+            # Normalize both versions before comparison to handle -pN suffixes, etc.
+            latest_normalized = normalize_version_string(latest_version)
+            current_normalized = normalize_version_string(current)
+            if Version(latest_normalized) <= Version(current_normalized):
                 print("  -> up to date")
                 continue
         except InvalidVersion:
@@ -583,11 +658,29 @@ def extract_semver_core(tag: str) -> str | None:
 
 
 def parse_semver_from_tag(tag: str) -> Version | None:
-    core = extract_semver_core(tag)
-    if not core:
+    """
+    Parse a version tag into a packaging.version.Version object.
+
+    Uses normalize_version_string() to handle non-standard version formats
+    like Docker image patches (-p1) and Debian package revisions (-2).
+
+    Args:
+        tag: Version tag string to parse
+
+    Returns:
+        Version object if parsing succeeds, None otherwise
+
+    Examples:
+        >>> parse_semver_from_tag("v1.24.1-p1")
+        <Version('1.24.1.post1')>
+        >>> parse_semver_from_tag("1.24.1-alpine")
+        <Version('1.24.1')>
+    """
+    normalized = normalize_version_string(tag)
+    if not normalized:
         return None
     try:
-        return Version(core)
+        return Version(normalized)
     except InvalidVersion:
         return None
 

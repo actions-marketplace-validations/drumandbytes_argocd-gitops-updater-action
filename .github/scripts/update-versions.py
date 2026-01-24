@@ -1297,12 +1297,12 @@ async def async_main():
     ignore_config = config.get("ignore")
 
     # Clear incompatible cache from previous runs if it exists
-    # The cache format changed when we added include_headers=False
+    # The cache format changed - testing without include_headers parameter
     cache_dir = Path(".registry_cache")
     if cache_dir.exists():
         # Check if this is an old/incompatible cache by looking for a marker file
         cache_version_file = cache_dir / ".cache_version"
-        expected_version = "v2_no_headers"
+        expected_version = "v3_test_default_params"
 
         if not cache_version_file.exists() or cache_version_file.read_text().strip() != expected_version:
             print("Detected incompatible cache format, clearing...")

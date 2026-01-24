@@ -818,10 +818,11 @@ async def list_dockerhub_tags(session: CachedSession, api_repo: str) -> List[str
         for attempt in range(max_retries):
             try:
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                    # Log cache hit/miss for debugging
-                    is_cached = hasattr(resp, 'from_cache') and resp.from_cache
-                    cache_status = "[CACHE HIT]" if is_cached else "[CACHE MISS]"
-                    print(f"  {cache_status} Docker Hub: {api_repo}")
+                    # Log cache hit/miss only for first page
+                    if len(tags) == 0:
+                        is_cached = hasattr(resp, 'from_cache') and resp.from_cache
+                        cache_status = "[CACHE HIT]" if is_cached else "[CACHE MISS]"
+                        print(f"  {cache_status} Docker Hub: {api_repo}")
                     resp.raise_for_status()
                     data = await resp.json()
                     for r in data.get("results", []):
@@ -1341,6 +1342,25 @@ async def async_main():
     )
     async with CachedSession(cache=CACHE_BACKEND, connector=connector) as session:
         print(f"Cache initialized: SQLite backend at .registry_cache/")
+
+        # Diagnostic: Check cache status
+        import os as diagnostic_os
+        cache_dir = Path(".registry_cache")
+        if cache_dir.exists():
+            cache_files = list(cache_dir.glob("**/*"))
+            print(f"  Cache directory exists with {len(cache_files)} files")
+            # Show cache size
+            total_size = sum(f.stat().st_size for f in cache_files if f.is_file())
+            print(f"  Total cache size: {total_size / 1024 / 1024:.2f} MB")
+        else:
+            print(f"  Cache directory does not exist yet")
+
+        # Check if there are weird files in current directory
+        weird_files = list(Path(".").glob("=*"))
+        if weird_files:
+            print(f"  WARNING: Found {len(weird_files)} files starting with '=' in current directory")
+            for f in weird_files[:5]:  # Show first 5
+                print(f"    - {f.name}")
 
         # Run Helm and Docker updates sequentially to reduce network stress
         # Parallel execution caused too many timeouts requiring retries that

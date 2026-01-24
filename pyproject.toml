@@ -1,7 +1,7 @@
 [project]
 name = "nanostorm-automation"
 version = "0.1.0"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "aiohttp>=3.9.0",
     "aiofiles>=23.0.0",

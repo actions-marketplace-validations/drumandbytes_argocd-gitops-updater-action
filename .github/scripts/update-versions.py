@@ -807,14 +807,27 @@ async def list_dockerhub_tags(session: CachedSession, api_repo: str) -> List[str
         headers["Authorization"] = f"Basic {encoded}"
 
     while url:
-        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            resp.raise_for_status()
-            data = await resp.json()
-            for r in data.get("results", []):
-                name = r.get("name")
-                if name:
-                    tags.append(name)
-            url = data.get("next")
+        # Retry logic for transient network errors
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+                    for r in data.get("results", []):
+                        name = r.get("name")
+                        if name:
+                            tags.append(name)
+                    url = data.get("next")
+                break
+            except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    print(f"  [WARN] Docker Hub request failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s: {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    print(f"  [ERROR] Docker Hub request failed after {max_retries} attempts: {e}")
+                    raise
 
     return tags
 
@@ -847,24 +860,36 @@ async def list_ghcr_tags(session: CachedSession, repository: str) -> List[str]:
 
     try:
         while url:
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-                tags = data.get("tags", [])
-                all_tags.extend(tags)
+            # Retry logic for transient network errors
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        resp.raise_for_status()
+                        data = await resp.json()
+                        tags = data.get("tags", [])
+                        all_tags.extend(tags)
 
-                # Check for pagination link in Link header
-                link_header = resp.headers.get("Link", "")
-                if link_header and 'rel="next"' in link_header:
-                    # Extract next URL from Link header
-                    # Format: </v2/repo/tags/list?n=100&last=tag>; rel="next"
-                    match = re.search(r'<(/v2/[^>]+)>;\s*rel="next"', link_header)
-                    if match:
-                        url = f"https://ghcr.io{match.group(1)}"
-                    else:
-                        break
-                else:
+                        # Check for pagination link in Link header
+                        link_header = resp.headers.get("Link", "")
+                        if link_header and 'rel="next"' in link_header:
+                            # Extract next URL from Link header
+                            # Format: </v2/repo/tags/list?n=100&last=tag>; rel="next"
+                            match = re.search(r'<(/v2/[^>]+)>;\s*rel="next"', link_header)
+                            if match:
+                                url = f"https://ghcr.io{match.group(1)}"
+                            else:
+                                break
+                        else:
+                            break
                     break
+                except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt
+                        print(f"  [WARN] GHCR request failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s: {e}")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        raise
 
         return all_tags
     except Exception as e:
@@ -879,21 +904,33 @@ async def list_quay_tags(session: CachedSession, repository: str) -> List[str]:
 
     try:
         while url:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
+            # Retry logic for transient network errors
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        resp.raise_for_status()
+                        data = await resp.json()
 
-                for tag_data in data.get("tags", []):
-                    name = tag_data.get("name")
-                    if name:
-                        tags.append(name)
+                        for tag_data in data.get("tags", []):
+                            name = tag_data.get("name")
+                            if name:
+                                tags.append(name)
 
-                # Check if there are more pages
-                if data.get("has_additional"):
-                    page = data.get("page", 1) + 1
-                    url = f"https://quay.io/api/v1/repository/{repository}/tag/?limit=100&page={page}"
-                else:
-                    url = None
+                        # Check if there are more pages
+                        if data.get("has_additional"):
+                            page = data.get("page", 1) + 1
+                            url = f"https://quay.io/api/v1/repository/{repository}/tag/?limit=100&page={page}"
+                        else:
+                            url = None
+                    break
+                except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt
+                        print(f"  [WARN] Quay.io request failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s: {e}")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        raise
 
         return tags
     except Exception as e:
@@ -912,13 +949,24 @@ async def list_gcr_tags(session: CachedSession, repository: str) -> List[str]:
     url = f"https://gcr.io/v2/{repository}/tags/list"
 
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status == 401:
-                print(f"  [WARN] gcr.io repository {repository} requires authentication")
-                return []
-            resp.raise_for_status()
-            data = await resp.json()
-            return data.get("tags", [])
+        # Retry logic for transient network errors
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 401:
+                        print(f"  [WARN] gcr.io repository {repository} requires authentication")
+                        return []
+                    resp.raise_for_status()
+                    data = await resp.json()
+                    return data.get("tags", [])
+            except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"  [WARN] GCR request failed (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s: {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise
     except Exception as e:
         print(f"  [WARN] Failed to fetch gcr.io tags for {repository}: {e}")
         return []

@@ -8,23 +8,12 @@ import traceback
 from typing import Optional, Tuple, List, Set, Dict, Any
 
 import aiohttp
-from aiohttp_client_cache import CacheBackend, CachedSession
 import aiofiles
 import yaml
 from packaging.version import Version, InvalidVersion
 
 CONFIG_PATH = Path(".update-config.yaml")
 REPORT_PATH = Path(".update-report.txt")
-
-# Initialize async cached session for API calls (expires after 6 hours)
-# Cache directory will be created in .registry_cache/
-# Using SQLite backend for async concurrent access
-# NOTE: Removed include_headers parameter as it may not be valid/working
-CACHE_BACKEND = CacheBackend(
-    cache_name='.registry_cache/aiohttp_cache',
-    expire_after=21600,  # 6 hours
-    allowed_methods=['GET'],
-)
 
 # Async lock for file writes
 FILE_WRITE_LOCK = asyncio.Lock()
@@ -280,7 +269,7 @@ def replace_yaml_scalar(text: str, key: str, old: str, new: str) -> Tuple[str, i
 # ----------------- HELM STUFF -----------------
 
 
-async def get_latest_helm_chart_version(session: CachedSession, repo_url: str, chart_name: str) -> Optional[str]:
+async def get_latest_helm_chart_version(session: aiohttp.ClientSession, repo_url: str, chart_name: str) -> Optional[str]:
     """Get the latest Helm chart version from a repository."""
     index_url = repo_url.rstrip("/") + "/index.yaml"
 
@@ -291,12 +280,6 @@ async def get_latest_helm_chart_version(session: CachedSession, repo_url: str, c
         for attempt in range(max_retries):
             try:
                 async with session.get(index_url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                    # Log cache hit/miss for debugging
-                    is_cached = hasattr(resp, 'from_cache') and resp.from_cache
-                    if is_cached:
-                        print(f"  [CACHE HIT] {repo_url}/{chart_name}")
-                    else:
-                        print(f"  [CACHE MISS] Fetching {repo_url}/{chart_name}")
                     resp.raise_for_status()
                     content = await resp.text()
                 break
@@ -489,7 +472,7 @@ async def update_chart_yaml(file_path: Path, chart_name: str, latest_version: st
     return True, target_current, latest_version
 
 
-async def process_argo_app(session: CachedSession, app: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
+async def process_argo_app(session: aiohttp.ClientSession, app: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
     """Process a single Argo CD app. Returns (changed_files, helm_changes, errors)."""
     changed_files = set()
     helm_changes = []
@@ -540,7 +523,7 @@ async def process_argo_app(session: CachedSession, app: dict, ignore_config: Opt
     return changed_files, helm_changes, None
 
 
-async def process_kustomize_chart(session: CachedSession, entry: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
+async def process_kustomize_chart(session: aiohttp.ClientSession, entry: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
     """Process a single Kustomize Helm chart. Returns (changed_files, helm_changes, errors)."""
     changed_files = set()
     helm_changes = []
@@ -585,7 +568,7 @@ async def process_kustomize_chart(session: CachedSession, entry: dict, ignore_co
     return changed_files, helm_changes, None
 
 
-async def process_chart_dependency(session: CachedSession, entry: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
+async def process_chart_dependency(session: aiohttp.ClientSession, entry: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
     """Process a single Chart.yaml dependency. Returns (changed_files, helm_changes, errors)."""
     changed_files = set()
     helm_changes = []
@@ -630,7 +613,7 @@ async def process_chart_dependency(session: CachedSession, entry: dict, ignore_c
     return changed_files, helm_changes, None
 
 
-async def update_helm_charts(session: CachedSession, config: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict]]:
+async def update_helm_charts(session: aiohttp.ClientSession, config: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict]]:
     """Update all Helm charts concurrently."""
     changed_files = set()
     helm_changes = []
@@ -794,7 +777,7 @@ def is_tag_candidate(tag: str, required_variant: Optional[str] = None) -> bool:
     return True
 
 
-async def list_dockerhub_tags(session: CachedSession, api_repo: str) -> List[str]:
+async def list_dockerhub_tags(session: aiohttp.ClientSession, api_repo: str) -> List[str]:
     """
     List tags from Docker Hub.
 
@@ -824,11 +807,6 @@ async def list_dockerhub_tags(session: CachedSession, api_repo: str) -> List[str
         for attempt in range(max_retries):
             try:
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                    # Log cache hit/miss only for first page
-                    if len(tags) == 0:
-                        is_cached = hasattr(resp, 'from_cache') and resp.from_cache
-                        cache_status = "[CACHE HIT]" if is_cached else "[CACHE MISS]"
-                        print(f"  {cache_status} Docker Hub: {api_repo}")
                     resp.raise_for_status()
                     data = await resp.json()
                     for r in data.get("results", []):
@@ -849,7 +827,7 @@ async def list_dockerhub_tags(session: CachedSession, api_repo: str) -> List[str
     return tags
 
 
-async def list_ghcr_tags(session: CachedSession, repository: str) -> List[str]:
+async def list_ghcr_tags(session: aiohttp.ClientSession, repository: str) -> List[str]:
     """
     List tags from GitHub Container Registry (ghcr.io).
 
@@ -914,7 +892,7 @@ async def list_ghcr_tags(session: CachedSession, repository: str) -> List[str]:
         return []
 
 
-async def list_quay_tags(session: CachedSession, repository: str) -> List[str]:
+async def list_quay_tags(session: aiohttp.ClientSession, repository: str) -> List[str]:
     """List tags from Quay.io."""
     url = f"https://quay.io/api/v1/repository/{repository}/tag/?limit=100&page=1"
     tags: List[str] = []
@@ -955,7 +933,7 @@ async def list_quay_tags(session: CachedSession, repository: str) -> List[str]:
         return []
 
 
-async def list_gcr_tags(session: CachedSession, repository: str) -> List[str]:
+async def list_gcr_tags(session: aiohttp.ClientSession, repository: str) -> List[str]:
     """
     List tags from Google Container Registry (gcr.io).
 
@@ -989,7 +967,7 @@ async def list_gcr_tags(session: CachedSession, repository: str) -> List[str]:
         return []
 
 
-async def list_registry_tags(session: CachedSession, registry: str, repository: str) -> List[str]:
+async def list_registry_tags(session: aiohttp.ClientSession, registry: str, repository: str) -> List[str]:
     """
     List tags from any container registry.
 
@@ -1025,12 +1003,12 @@ async def list_registry_tags(session: CachedSession, registry: str, repository: 
             return []
 
 
-async def find_best_tags_for_same_major(session: CachedSession, registry: str, repository: str, current_tag: str, semaphore: Optional[asyncio.Semaphore] = None, entry: Optional[dict] = None, ignore_config: Optional[dict] = None) -> Tuple[Optional[str], Optional[Version], Optional[str], Optional[Version]]:
+async def find_best_tags_for_same_major(session: aiohttp.ClientSession, registry: str, repository: str, current_tag: str, semaphore: Optional[asyncio.Semaphore] = None, entry: Optional[dict] = None, ignore_config: Optional[dict] = None) -> Tuple[Optional[str], Optional[Version], Optional[str], Optional[Version]]:
     """
     Find the best tags for the same major version.
 
     Args:
-        session: The aiohttp cached session
+        session: The aiohttp client session
         registry: The container registry (dockerhub, ghcr.io, etc.)
         repository: The repository path
         current_tag: The current tag to compare against
@@ -1122,7 +1100,7 @@ async def find_best_tags_for_same_major(session: CachedSession, registry: str, r
     return best_same_tag, best_same_ver, best_any_tag, best_any_ver
 
 
-async def update_single_docker_image(session: CachedSession, entry: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[bool, Optional[str], Optional[str], Optional[dict]]:
+async def update_single_docker_image(session: aiohttp.ClientSession, entry: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[bool, Optional[str], Optional[str], Optional[dict]]:
     """Update a single Docker image."""
     try:
         registry = entry.get("registry", "dockerhub")
@@ -1165,17 +1143,34 @@ async def update_single_docker_image(session: CachedSession, entry: dict, ignore
         current_ver = parse_semver_from_tag(current_tag)
         major_available = None
         if current_ver and best_any_ver and best_any_ver.major > current_ver.major:
-            print(
-                f"  [INFO] New major available in {repository}: {best_any_tag} "
-                f"(current major {current_ver.major}, new major {best_any_ver.major})"
-            )
-            major_available = {
-                "id": entry["id"],
-                "current": current_tag,
-                "available": best_any_tag,
-                "current_major": current_ver.major,
-                "new_major": best_any_ver.major,
-            }
+            # Check if the best_any_tag matches versionPattern (should be ignored)
+            should_skip_major = False
+            if ignore_config:
+                docker_ignores = ignore_config.get("dockerImages", [])
+                for ignore_rule in docker_ignores:
+                    if "id" in ignore_rule and ignore_rule["id"] == entry.get("id"):
+                        if "versionPattern" in ignore_rule:
+                            version_pattern = ignore_rule["versionPattern"]
+                            if re.match(version_pattern, best_any_tag):
+                                print(
+                                    f"  [INFO] Skipping major upgrade report: {best_any_tag} "
+                                    f"matches versionPattern {version_pattern}"
+                                )
+                                should_skip_major = True
+                                break
+
+            if not should_skip_major:
+                print(
+                    f"  [INFO] New major available in {repository}: {best_any_tag} "
+                    f"(current major {current_ver.major}, new major {best_any_ver.major})"
+                )
+                major_available = {
+                    "id": entry["id"],
+                    "current": current_tag,
+                    "available": best_any_tag,
+                    "current_major": current_ver.major,
+                    "new_major": best_any_ver.major,
+                }
 
         if not best_same_tag or not best_same_ver or current_ver is None:
             print("  [INFO] No suitable same-major update found, skipping")
@@ -1209,7 +1204,7 @@ async def update_single_docker_image(session: CachedSession, entry: dict, ignore
         raise
 
 
-async def update_docker_images(session: CachedSession, config: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], List[dict]]:
+async def update_docker_images(session: aiohttp.ClientSession, config: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], List[dict]]:
     """Update all Docker images concurrently."""
     changed_files = set()
     docker_changes = []
@@ -1317,22 +1312,6 @@ async def async_main():
     config = await load_yaml(CONFIG_PATH)
     ignore_config = config.get("ignore")
 
-    # Clear incompatible cache from previous runs if it exists
-    # The cache format changed - testing without include_headers parameter
-    cache_dir = Path(".registry_cache")
-    if cache_dir.exists():
-        # Check if this is an old/incompatible cache by looking for a marker file
-        cache_version_file = cache_dir / ".cache_version"
-        expected_version = "v4_with_version_pattern_fix"
-
-        if not cache_version_file.exists() or cache_version_file.read_text().strip() != expected_version:
-            print("Detected incompatible cache format, clearing...")
-            import shutil
-            shutil.rmtree(cache_dir)
-            cache_dir.mkdir()
-            cache_version_file.write_text(expected_version)
-            print("Cache cleared and reinitialized")
-
     # Initialize registry-specific semaphores
     global REGISTRY_SEMAPHORES, HELM_SEMAPHORE
 
@@ -1376,34 +1355,13 @@ async def async_main():
 
     changed_files = set()
 
-    # Create cached session with connection limits to avoid overwhelming network
+    # Create session with connection limits to avoid overwhelming network
     connector = aiohttp.TCPConnector(
         limit=30,  # Total concurrent connections
         limit_per_host=10,  # Max concurrent connections per host
         ttl_dns_cache=300  # Cache DNS for 5 minutes
     )
-    async with CachedSession(cache=CACHE_BACKEND, connector=connector) as session:
-        print(f"Cache initialized: SQLite backend at .registry_cache/")
-
-        # Diagnostic: Check cache status
-        import os as diagnostic_os
-        cache_dir = Path(".registry_cache")
-        if cache_dir.exists():
-            cache_files = list(cache_dir.glob("**/*"))
-            print(f"  Cache directory exists with {len(cache_files)} files")
-            # Show cache size
-            total_size = sum(f.stat().st_size for f in cache_files if f.is_file())
-            print(f"  Total cache size: {total_size / 1024 / 1024:.2f} MB")
-        else:
-            print(f"  Cache directory does not exist yet")
-
-        # Check if there are weird files in current directory
-        weird_files = list(Path(".").glob("=*"))
-        if weird_files:
-            print(f"  WARNING: Found {len(weird_files)} files starting with '=' in current directory")
-            for f in weird_files[:5]:  # Show first 5
-                print(f"    - {f.name}")
-
+    async with aiohttp.ClientSession(connector=connector) as session:
         # Run Helm and Docker updates sequentially to reduce network stress
         # Parallel execution caused too many timeouts requiring retries that
         # negated the performance benefit. Sequential is more reliable.
@@ -1417,20 +1375,6 @@ async def async_main():
 
         changed_files |= helm_changed_files
         changed_files |= docker_changed_files
-
-    # Diagnostic: Check cache after session closes
-    cache_files_after = list(cache_dir.glob("**/*"))
-    total_size_after = sum(f.stat().st_size for f in cache_files_after if f.is_file())
-    print(f"\n[CACHE DIAGNOSTIC] After session closed:")
-    print(f"  Files in cache: {len(cache_files_after)}")
-    print(f"  Cache size: {total_size_after / 1024 / 1024:.2f} MB")
-    if total_size_after == 0:
-        print(f"  WARNING: Cache was not populated! This explains all CACHE MISS.")
-        print(f"  CRITICAL: aiohttp-client-cache is not working with current configuration.")
-        print(f"  The async refactoring provides performance benefits from concurrent requests,")
-        print(f"  but without working cache, you won't see sub-10s times on subsequent runs.")
-        print(f"  Current performance: ~60s (acceptable for I/O-bound workload)")
-        print(f"  With working cache: ~5-15s (ideal but requires fixing cache)")
 
     # Write report (for CI/Telegram, etc.)
     if not dry_run:

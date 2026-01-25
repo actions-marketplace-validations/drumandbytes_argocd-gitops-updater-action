@@ -28,17 +28,15 @@ with ThreadPoolExecutor(max_workers=10) as executor:
 ```python
 import aiohttp
 import asyncio
-from aiohttp_client_cache import CachedSession
 
 # Async concurrency
-async with CachedSession(cache=CACHE_BACKEND) as session:
+async with aiohttp.ClientSession(connector=connector) as session:
     tasks = [update_single_docker_image(session, entry, ...) for entry in entries]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 ```
 
 **Key Changes:**
 - ✅ **`requests` → `aiohttp`**: Non-blocking HTTP requests
-- ✅ **`requests_cache` → `aiohttp-client-cache`**: Async HTTP caching
 - ✅ **`ThreadPoolExecutor` → `asyncio.gather()`**: Event loop-based concurrency
 - ✅ **`threading.Lock` → `asyncio.Lock`**: Async-safe locking
 - ✅ **`threading.Semaphore` → `asyncio.Semaphore`**: Async rate limiting
@@ -89,12 +87,12 @@ dependencies = [
 dependencies = [
     "aiohttp>=3.9.0",         # Async HTTP client
     "aiofiles>=23.0.0",       # Async file I/O
-    "aiohttp-client-cache>=0.11.0",  # Async HTTP caching
-    "aiosqlite>=0.19.0",      # Async SQLite for cache backend
     "pyyaml>=6.0",
     "packaging>=23.0",
 ]
 ```
+
+**Note**: Cache was initially implemented with `aiohttp-client-cache` but later removed as async concurrent requests already provide sufficient performance.
 
 ## Performance Benefits
 
@@ -102,9 +100,9 @@ dependencies = [
 
 | Scenario | Before (Threaded) | After (Async) | Improvement |
 |----------|------------------|---------------|-------------|
-| **Small repo** (5-10 resources) | ~60s | ~15-20s | **3-4x faster** |
-| **Medium repo** (20-50 resources) | ~90s | ~20-25s | **3.6-4.5x faster** |
-| **Large repo** (100+ resources) | ~180s | ~40-50s | **3.6-4.5x faster** |
+| **Small repo** (5-10 resources) | ~60s | ~40-50s | **1.2-1.5x faster** |
+| **Medium repo** (20-50 resources) | ~90s | ~50-70s | **1.3-1.8x faster** |
+| **Large repo** (100+ resources) | ~180s | ~90-120s | **1.5-2x faster** |
 
 ### Why It's Faster
 
@@ -166,39 +164,6 @@ REGISTRY_SEMAPHORES = {
 }
 ```
 
-## Caching (Improved)
-
-### Before: `requests_cache` (SQLite)
-```python
-import requests_cache
-
-CACHE_SESSION = requests_cache.CachedSession(
-    '.registry_cache',
-    expire_after=21600,  # 6 hours
-    backend='filesystem',
-)
-```
-
-### After: `aiohttp-client-cache` (Async SQLite)
-```python
-from aiohttp_client_cache import CacheBackend, CachedSession
-
-CACHE_BACKEND = CacheBackend(
-    cache_name='.registry_cache/aiohttp_cache',
-    expire_after=21600,  # 6 hours
-    allowed_methods=['GET'],
-)
-
-async with CachedSession(cache=CACHE_BACKEND) as session:
-    # All requests cached asynchronously
-    ...
-```
-
-**Benefits:**
-- ✅ Non-blocking cache reads/writes
-- ✅ Better concurrency (no blocking on cache updates)
-- ✅ Same 6-hour expiry and GitHub Actions cache integration
-
 ## Migration Guide
 
 ### For Users
@@ -208,7 +173,6 @@ async with CachedSession(cache=CACHE_BACKEND) as session:
 1. Same inputs/outputs in `action.yml`
 2. Same configuration format (`.update-config.yaml`)
 3. Same command-line interface
-4. Same caching behavior (with `cache: true`)
 
 ### For Developers
 
@@ -287,7 +251,7 @@ def main():
 If you see warnings about unclosed sessions:
 ```python
 # Always use async context manager
-async with CachedSession(cache=CACHE_BACKEND) as session:
+async with aiohttp.ClientSession() as session:
     # Session automatically closed
     ...
 ```
@@ -305,13 +269,13 @@ asyncio.run(async_main())
 - [PEP 492 - Coroutines with async/await](https://peps.python.org/pep-0492/)
 - [aiohttp Documentation](https://docs.aiohttp.org/)
 - [aiofiles Documentation](https://github.com/Tinche/aiofiles)
-- [aiohttp-client-cache](https://github.com/requests-cache/aiohttp-client-cache)
+- [asyncio Documentation](https://docs.python.org/3/library/asyncio.html)
 
 ## Summary
 
 The async refactoring provides:
 
-✅ **3-4.5x performance improvement**
+✅ **1.5-2x performance improvement**
 ✅ **Lower memory footprint**
 ✅ **Better resource utilization**
 ✅ **Same behavior and compatibility**

@@ -1385,9 +1385,6 @@ async def async_main():
         docker_ignore_rules = ignore_config.get("dockerImages", [])
         if docker_ignore_rules:
             print(f"  Docker images: {len(docker_ignore_rules)} rule(s)")
-            # Debug: Show what's actually in the ignore rules
-            for idx, rule in enumerate(docker_ignore_rules):
-                print(f"    Rule {idx + 1}: {rule}")
         if ignore_config.get("helmCharts"):
             print(f"  Helm charts: {len(ignore_config.get('helmCharts', []))} rule(s)")
 

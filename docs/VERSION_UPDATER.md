@@ -345,47 +345,36 @@ If rate limited (429 error), the script automatically retries with exponential b
 - Attempt 4: Wait 8 seconds
 - Then fail with error
 
-### HTTP Request Caching
+### Async Processing
 
-Registry API responses are cached for 6 hours using SQLite:
+The action uses async/await for concurrent API requests:
 
-- **First run (no cache)**: ~20-30s for 10 images (mostly HTTP request time)
-- **Fully cached run**: ~2-5s for 10 images (5-10x faster, within 6-hour cache window)
-- **Partially cached run**: ~8-15s for 10 images (2-3x faster, some cache expired)
-- **Cache location**: `.registry_cache/` directory (automatically created)
-
-**Benefits**:
-- 5-10x speedup for repeated runs (when cache is fresh)
-- Reduces API rate limiting issues
-- Works offline after first run (with stale cache fallback)
+- **Concurrent Processing**: Multiple resources checked in parallel
+- **Per-Registry Rate Limiting**: Semaphores prevent overwhelming APIs
+  - Docker Hub: 3-5 concurrent (based on auth)
+  - GHCR: 10 concurrent
+  - Quay/GCR: 5 concurrent each
+- **Helm Concurrency**: 5 parallel chart checks
 
 ### Performance Summary Example
 
 ```
 ============================================================
 Performance Summary:
-  Helm charts: 2.34s (8 charts)
-  Docker images: 1.87s (10 images)
-  Total time: 4.21s
+  Helm charts: 8.45s (8 charts)
+  Docker images: 35.12s (10 images)
+  Total time: 43.57s
 ============================================================
 ```
 
 **Typical Performance** (for 10 Docker images + 8 Helm charts):
-- First run (no cache): 15-25 seconds
-- Subsequent runs (cached): 2-5 seconds
-- **Improvement**: 3-12x faster (typically ~5x, depending on cache hit rate)
+- Standard run: 40-60 seconds
+- Performance varies based on:
+  - Number of tags per image (more tags = slower)
+  - Network latency to registries
+  - Authentication status (affects concurrency limits)
 
-### Cache Management
-
-The cache is automatically managed:
-- **Expiration**: 6 hours (configurable in code)
-- **Storage**: `.registry_cache/http_cache.sqlite`
-- **Size**: Typically <10MB
-- **Cleanup**: Delete `.registry_cache/` to clear
-
-**To disable caching**: Replace `CACHE_SESSION` with `requests` in the code (not recommended).
-
-### Thread Safety
+### Async Safety
 
 All file operations use locks to prevent race conditions:
 - Multiple threads can read registry APIs simultaneously

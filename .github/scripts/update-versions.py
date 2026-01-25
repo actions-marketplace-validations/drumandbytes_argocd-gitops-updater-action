@@ -130,72 +130,107 @@ async def retry_on_rate_limit(coro_func, max_retries=3):
     return None
 
 
-def should_ignore_docker_image(entry: dict, tag: str, ignore_config: Optional[dict]) -> Tuple[bool, Optional[str]]:
+def build_ignore_lookups(ignore_config: Optional[dict]) -> Tuple[Dict[str, dict], Dict[str, dict]]:
+    """
+    Build optimized lookup structures for ignore rules with pre-compiled regex patterns.
+
+    Returns:
+        (docker_ignore_by_id, helm_ignore_by_name) - O(1) lookup dicts with compiled patterns
+    """
+    docker_ignore_by_id = {}
+    helm_ignore_by_name = {}
+
+    if not ignore_config:
+        return docker_ignore_by_id, helm_ignore_by_name
+
+    # Process Docker image ignore rules
+    docker_ignores = ignore_config.get("dockerImages", [])
+    for ignore_rule in docker_ignores:
+        if "id" in ignore_rule:
+            # Pre-compile regex patterns for performance
+            processed_rule = ignore_rule.copy()
+
+            if "versionPattern" in ignore_rule:
+                processed_rule["_compiled_version_pattern"] = re.compile(ignore_rule["versionPattern"])
+
+            if "tagPattern" in ignore_rule:
+                processed_rule["_compiled_tag_pattern"] = re.compile(ignore_rule["tagPattern"])
+
+            docker_ignore_by_id[ignore_rule["id"]] = processed_rule
+
+    # Process Helm chart ignore rules
+    helm_ignores = ignore_config.get("helmCharts", [])
+    for ignore_rule in helm_ignores:
+        if "name" in ignore_rule:
+            processed_rule = ignore_rule.copy()
+
+            if "versionPattern" in ignore_rule:
+                processed_rule["_compiled_version_pattern"] = re.compile(ignore_rule["versionPattern"])
+
+            helm_ignore_by_name[ignore_rule["name"]] = processed_rule
+
+    return docker_ignore_by_id, helm_ignore_by_name
+
+
+def should_ignore_docker_image(entry: dict, tag: str, docker_ignore_by_id: Dict[str, dict]) -> Tuple[bool, Optional[str]]:
     """
     Check if a Docker image should be ignored based on ignore configuration.
 
     Args:
         entry: Docker image entry from config
         tag: Current tag of the image
-        ignore_config: ignore section from config
+        docker_ignore_by_id: Pre-built lookup dict with compiled regex patterns
 
     Returns:
         (should_ignore: bool, reason: str)
     """
-    if not ignore_config:
+    if not docker_ignore_by_id:
         return False, None
 
-    docker_ignores = ignore_config.get("dockerImages", [])
+    # O(1) lookup by ID
+    entry_id = entry.get("id")
+    if entry_id and entry_id in docker_ignore_by_id:
+        ignore_rule = docker_ignore_by_id[entry_id]
 
-    for ignore_rule in docker_ignores:
-        # Check by ID
-        if "id" in ignore_rule and ignore_rule["id"] == entry.get("id"):
-            # If there's a versionPattern, don't skip the image entirely
-            # The pattern will be used to filter out specific versions during tag selection
-            if "versionPattern" not in ignore_rule:
-                # No version pattern means ignore all versions of this image
-                return True, f"ignored by ID: {ignore_rule['id']}"
+        # If there's a versionPattern, don't skip the image entirely
+        # The pattern will be used to filter out specific versions during tag selection
+        if "versionPattern" not in ignore_rule:
+            # No version pattern means ignore all versions of this image
+            return True, f"ignored by ID: {ignore_rule['id']}"
 
-        # Check by repository
-        if "repository" in ignore_rule and ignore_rule["repository"] == entry.get("repository"):
-            # Check if there's a tag pattern
-            if "tagPattern" in ignore_rule:
-                pattern = ignore_rule["tagPattern"]
-                if re.match(pattern, tag):
-                    return True, f"ignored by repository + tag pattern: {ignore_rule['repository']} with tag {pattern}"
-            else:
-                return True, f"ignored by repository: {ignore_rule['repository']}"
+        # Check tag pattern if present (uses pre-compiled regex)
+        if "_compiled_tag_pattern" in ignore_rule:
+            if ignore_rule["_compiled_tag_pattern"].match(tag):
+                return True, f"ignored by ID + tag pattern: {ignore_rule['id']}"
 
     return False, None
 
 
-def should_ignore_helm_chart(name: str, version: str, ignore_config: Optional[dict]) -> Tuple[bool, Optional[str]]:
+def should_ignore_helm_chart(name: str, version: str, helm_ignore_by_name: Dict[str, dict]) -> Tuple[bool, Optional[str]]:
     """
     Check if a Helm chart should be ignored based on ignore configuration.
 
     Args:
         name: Helm chart name
         version: Current version of the chart
-        ignore_config: ignore section from config
+        helm_ignore_by_name: Pre-built lookup dict with compiled regex patterns
 
     Returns:
         (should_ignore: bool, reason: str)
     """
-    if not ignore_config:
+    if not helm_ignore_by_name:
         return False, None
 
-    helm_ignores = ignore_config.get("helmCharts", [])
+    # O(1) lookup by name
+    if name in helm_ignore_by_name:
+        ignore_rule = helm_ignore_by_name[name]
 
-    for ignore_rule in helm_ignores:
-        # Check by name
-        if "name" in ignore_rule and ignore_rule["name"] == name:
-            # Check if there's a version pattern
-            if "versionPattern" in ignore_rule:
-                pattern = ignore_rule["versionPattern"]
-                if re.match(pattern, version):
-                    return True, f"ignored by name + version pattern: {name} with version {pattern}"
-            else:
-                return True, f"ignored by name: {name}"
+        # Check if there's a version pattern (uses pre-compiled regex)
+        if "_compiled_version_pattern" in ignore_rule:
+            if ignore_rule["_compiled_version_pattern"].match(version):
+                return True, f"ignored by name + version pattern: {name} with version {ignore_rule['versionPattern']}"
+        else:
+            return True, f"ignored by name: {name}"
 
     return False, None
 
@@ -472,7 +507,7 @@ async def update_chart_yaml(file_path: Path, chart_name: str, latest_version: st
     return True, target_current, latest_version
 
 
-async def process_argo_app(session: aiohttp.ClientSession, app: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
+async def process_argo_app(session: aiohttp.ClientSession, app: dict, helm_ignore_by_name: Dict[str, dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
     """Process a single Argo CD app. Returns (changed_files, helm_changes, errors)."""
     changed_files = set()
     helm_changes = []
@@ -492,7 +527,7 @@ async def process_argo_app(session: aiohttp.ClientSession, app: dict, ignore_con
         except (KeyError, TypeError):
             pass
 
-        ignored, reason = should_ignore_helm_chart(name, current_version, ignore_config)
+        ignored, reason = should_ignore_helm_chart(name, current_version, helm_ignore_by_name)
         if ignored:
             print(f"  [SKIP] {reason}")
             return changed_files, helm_changes, None
@@ -523,7 +558,7 @@ async def process_argo_app(session: aiohttp.ClientSession, app: dict, ignore_con
     return changed_files, helm_changes, None
 
 
-async def process_kustomize_chart(session: aiohttp.ClientSession, entry: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
+async def process_kustomize_chart(session: aiohttp.ClientSession, entry: dict, helm_ignore_by_name: Dict[str, dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
     """Process a single Kustomize Helm chart. Returns (changed_files, helm_changes, errors)."""
     changed_files = set()
     helm_changes = []
@@ -535,7 +570,7 @@ async def process_kustomize_chart(session: aiohttp.ClientSession, entry: dict, i
 
     try:
         # For kustomize, we'll check with empty version (can add more sophisticated check if needed)
-        ignored, reason = should_ignore_helm_chart(name, "", ignore_config)
+        ignored, reason = should_ignore_helm_chart(name, "", helm_ignore_by_name)
         if ignored:
             print(f"  [SKIP] {reason}")
             return changed_files, helm_changes, None
@@ -568,7 +603,7 @@ async def process_kustomize_chart(session: aiohttp.ClientSession, entry: dict, i
     return changed_files, helm_changes, None
 
 
-async def process_chart_dependency(session: aiohttp.ClientSession, entry: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
+async def process_chart_dependency(session: aiohttp.ClientSession, entry: dict, helm_ignore_by_name: Dict[str, dict], dry_run: bool) -> Tuple[Set[str], List[dict], Optional[str]]:
     """Process a single Chart.yaml dependency. Returns (changed_files, helm_changes, errors)."""
     changed_files = set()
     helm_changes = []
@@ -580,7 +615,7 @@ async def process_chart_dependency(session: aiohttp.ClientSession, entry: dict, 
 
     try:
         # Check if chart is ignored
-        ignored, reason = should_ignore_helm_chart(name, "", ignore_config)
+        ignored, reason = should_ignore_helm_chart(name, "", helm_ignore_by_name)
         if ignored:
             print(f"  [SKIP] {reason}")
             return changed_files, helm_changes, None
@@ -613,7 +648,7 @@ async def process_chart_dependency(session: aiohttp.ClientSession, entry: dict, 
     return changed_files, helm_changes, None
 
 
-async def update_helm_charts(session: aiohttp.ClientSession, config: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict]]:
+async def update_helm_charts(session: aiohttp.ClientSession, config: dict, helm_ignore_by_name: Dict[str, dict], dry_run: bool) -> Tuple[Set[str], List[dict]]:
     """Update all Helm charts concurrently."""
     changed_files = set()
     helm_changes = []
@@ -634,11 +669,11 @@ async def update_helm_charts(session: aiohttp.ClientSession, config: dict, ignor
     tasks = []
     for task_type, item in all_tasks:
         if task_type == "argo":
-            task = process_argo_app(session, item, ignore_config, dry_run)
+            task = process_argo_app(session, item, helm_ignore_by_name, dry_run)
         elif task_type == "kustomize":
-            task = process_kustomize_chart(session, item, ignore_config, dry_run)
+            task = process_kustomize_chart(session, item, helm_ignore_by_name, dry_run)
         else:  # chartDep
-            task = process_chart_dependency(session, item, ignore_config, dry_run)
+            task = process_chart_dependency(session, item, helm_ignore_by_name, dry_run)
         tasks.append(task)
 
     # Gather all results
@@ -1003,7 +1038,7 @@ async def list_registry_tags(session: aiohttp.ClientSession, registry: str, repo
             return []
 
 
-async def find_best_tags_for_same_major(session: aiohttp.ClientSession, registry: str, repository: str, current_tag: str, semaphore: Optional[asyncio.Semaphore] = None, entry: Optional[dict] = None, ignore_config: Optional[dict] = None) -> Tuple[Optional[str], Optional[Version], Optional[str], Optional[Version]]:
+async def find_best_tags_for_same_major(session: aiohttp.ClientSession, registry: str, repository: str, current_tag: str, semaphore: Optional[asyncio.Semaphore] = None, entry: Optional[dict] = None, docker_ignore_by_id: Optional[Dict[str, dict]] = None) -> Tuple[Optional[str], Optional[Version], Optional[str], Optional[Version]]:
     """
     Find the best tags for the same major version.
 
@@ -1040,19 +1075,18 @@ async def find_best_tags_for_same_major(session: aiohttp.ClientSession, registry
         print(f"  [WARN] No tags found in registry {registry} for repo {repository}")
         return None, None, None, None
 
-    # Filter tags based on versionPattern in ignore rules
-    if entry and ignore_config:
-        docker_ignores = ignore_config.get("dockerImages", [])
-        for ignore_rule in docker_ignores:
-            if "id" in ignore_rule and ignore_rule["id"] == entry.get("id"):
-                if "versionPattern" in ignore_rule:
-                    version_pattern = ignore_rule["versionPattern"]
-                    original_count = len(tags)
-                    tags = [t for t in tags if not re.match(version_pattern, t)]
-                    filtered_count = original_count - len(tags)
-                    if filtered_count > 0:
-                        print(f"  [INFO] Filtered out {filtered_count} tags matching versionPattern: {version_pattern}")
-                break
+    # Filter tags based on versionPattern in ignore rules (using pre-compiled regex)
+    if entry and docker_ignore_by_id:
+        entry_id = entry.get("id")
+        if entry_id and entry_id in docker_ignore_by_id:
+            ignore_rule = docker_ignore_by_id[entry_id]
+            if "_compiled_version_pattern" in ignore_rule:
+                compiled_pattern = ignore_rule["_compiled_version_pattern"]
+                original_count = len(tags)
+                tags = [t for t in tags if not compiled_pattern.match(t)]
+                filtered_count = original_count - len(tags)
+                if filtered_count > 0:
+                    print(f"  [INFO] Filtered out {filtered_count} tags matching versionPattern: {ignore_rule['versionPattern']}")
 
     same_major: List[Tuple[Version, str]] = []
     all_versions: List[Tuple[Version, str]] = []
@@ -1100,7 +1134,7 @@ async def find_best_tags_for_same_major(session: aiohttp.ClientSession, registry
     return best_same_tag, best_same_ver, best_any_tag, best_any_ver
 
 
-async def update_single_docker_image(session: aiohttp.ClientSession, entry: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[bool, Optional[str], Optional[str], Optional[dict]]:
+async def update_single_docker_image(session: aiohttp.ClientSession, entry: dict, docker_ignore_by_id: Dict[str, dict], dry_run: bool) -> Tuple[bool, Optional[str], Optional[str], Optional[dict]]:
     """Update a single Docker image."""
     try:
         registry = entry.get("registry", "dockerhub")
@@ -1128,7 +1162,7 @@ async def update_single_docker_image(session: aiohttp.ClientSession, entry: dict
         print(f"  Current image: {image_str}")
 
         # Check if this image should be ignored
-        ignored, reason = should_ignore_docker_image(entry, current_tag, ignore_config)
+        ignored, reason = should_ignore_docker_image(entry, current_tag, docker_ignore_by_id)
         if ignored:
             print(f"  [SKIP] {reason}")
             return False, None, None, None
@@ -1137,27 +1171,24 @@ async def update_single_docker_image(session: aiohttp.ClientSession, entry: dict
         semaphore = REGISTRY_SEMAPHORES.get(registry)
 
         best_same_tag, best_same_ver, best_any_tag, best_any_ver = await find_best_tags_for_same_major(
-            session, registry, repository, current_tag, semaphore, entry, ignore_config
+            session, registry, repository, current_tag, semaphore, entry, docker_ignore_by_id
         )
 
         current_ver = parse_semver_from_tag(current_tag)
         major_available = None
         if current_ver and best_any_ver and best_any_ver.major > current_ver.major:
-            # Check if the best_any_tag matches versionPattern (should be ignored)
+            # Check if the best_any_tag matches versionPattern (should be ignored, using pre-compiled regex)
             should_skip_major = False
-            if ignore_config:
-                docker_ignores = ignore_config.get("dockerImages", [])
-                for ignore_rule in docker_ignores:
-                    if "id" in ignore_rule and ignore_rule["id"] == entry.get("id"):
-                        if "versionPattern" in ignore_rule:
-                            version_pattern = ignore_rule["versionPattern"]
-                            if re.match(version_pattern, best_any_tag):
-                                print(
-                                    f"  [INFO] Skipping major upgrade report: {best_any_tag} "
-                                    f"matches versionPattern {version_pattern}"
-                                )
-                                should_skip_major = True
-                                break
+            entry_id = entry.get("id")
+            if docker_ignore_by_id and entry_id and entry_id in docker_ignore_by_id:
+                ignore_rule = docker_ignore_by_id[entry_id]
+                if "_compiled_version_pattern" in ignore_rule:
+                    if ignore_rule["_compiled_version_pattern"].match(best_any_tag):
+                        print(
+                            f"  [INFO] Skipping major upgrade report: {best_any_tag} "
+                            f"matches versionPattern {ignore_rule['versionPattern']}"
+                        )
+                        should_skip_major = True
 
             if not should_skip_major:
                 print(
@@ -1204,7 +1235,7 @@ async def update_single_docker_image(session: aiohttp.ClientSession, entry: dict
         raise
 
 
-async def update_docker_images(session: aiohttp.ClientSession, config: dict, ignore_config: Optional[dict], dry_run: bool) -> Tuple[Set[str], List[dict], List[dict]]:
+async def update_docker_images(session: aiohttp.ClientSession, config: dict, docker_ignore_by_id: Dict[str, dict], dry_run: bool) -> Tuple[Set[str], List[dict], List[dict]]:
     """Update all Docker images concurrently."""
     changed_files = set()
     docker_changes = []
@@ -1216,7 +1247,7 @@ async def update_docker_images(session: aiohttp.ClientSession, config: dict, ign
         return changed_files, docker_changes, major_updates
 
     # Process images concurrently using asyncio.gather
-    tasks = [update_single_docker_image(session, entry, ignore_config, dry_run) for entry in entries]
+    tasks = [update_single_docker_image(session, entry, docker_ignore_by_id, dry_run) for entry in entries]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Process results
@@ -1312,6 +1343,9 @@ async def async_main():
     config = await load_yaml(CONFIG_PATH)
     ignore_config = config.get("ignore")
 
+    # Build optimized ignore lookups with pre-compiled regex patterns
+    docker_ignore_by_id, helm_ignore_by_name = build_ignore_lookups(ignore_config)
+
     # Initialize registry-specific semaphores
     global REGISTRY_SEMAPHORES, HELM_SEMAPHORE
 
@@ -1366,11 +1400,11 @@ async def async_main():
         # Parallel execution caused too many timeouts requiring retries that
         # negated the performance benefit. Sequential is more reliable.
         helm_start = time.time()
-        helm_changed_files, helm_changes = await update_helm_charts(session, config, ignore_config, dry_run=dry_run)
+        helm_changed_files, helm_changes = await update_helm_charts(session, config, helm_ignore_by_name, dry_run=dry_run)
         helm_duration = time.time() - helm_start
 
         docker_start = time.time()
-        docker_changed_files, docker_changes, major_updates = await update_docker_images(session, config, ignore_config, dry_run=dry_run)
+        docker_changed_files, docker_changes, major_updates = await update_docker_images(session, config, docker_ignore_by_id, dry_run=dry_run)
         docker_duration = time.time() - docker_start
 
         changed_files |= helm_changed_files

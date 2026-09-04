@@ -3,15 +3,23 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ci:
     uses: drumandbytes/reusable-actions/.github/workflows/python-action-ci.yml@v1
     with:
-      test-dependencies: "pytest pytest-asyncio aiohttp aiofiles pyyaml packaging"
+      test-dependencies: "pytest pytest-asyncio aiohttp aiofiles pyyaml packaging ruamel.yaml"
       required-files: |
         action.yml
         .github/scripts/update-versions.py

@@ -70,6 +70,18 @@ class TestParseImage:
         assert repo == "app"
         assert tag == "v1"
 
+    def test_custom_registry_with_port_and_no_tag(self):
+        """A registry:port image with NO tag at all used to be misparsed:
+        rsplit(":", 1) on the only colon (the port separator) treated
+        "5000/myimage" as the tag, producing a nonsensical repository
+        ("library/localhost") and tag. A real tag never contains "/" -
+        that's the signal used to tell a port separator apart from a
+        tag separator."""
+        registry, repo, tag = discover_resources.parse_image("localhost:5000/myimage")
+        assert registry == "localhost:5000"
+        assert repo == "myimage"
+        assert tag == "latest"
+
 
 class TestFindContainerImages:
     """Tests for find_container_images_in_yaml function."""
@@ -78,15 +90,7 @@ class TestFindContainerImages:
         """Test finding image in simple deployment."""
         data = {
             "kind": "Deployment",
-            "spec": {
-                "template": {
-                    "spec": {
-                        "containers": [
-                            {"name": "app", "image": "nginx:1.24.0"}
-                        ]
-                    }
-                }
-            }
+            "spec": {"template": {"spec": {"containers": [{"name": "app", "image": "nginx:1.24.0"}]}}},
         }
         images = discover_resources.find_container_images_in_yaml(data)
         assert len(images) == 1
@@ -101,11 +105,11 @@ class TestFindContainerImages:
                     "spec": {
                         "containers": [
                             {"name": "app", "image": "nginx:1.24.0"},
-                            {"name": "sidecar", "image": "busybox:1.36"}
+                            {"name": "sidecar", "image": "busybox:1.36"},
                         ]
                     }
                 }
-            }
+            },
         }
         images = discover_resources.find_container_images_in_yaml(data)
         assert len(images) == 2
@@ -117,25 +121,18 @@ class TestFindContainerImages:
             "spec": {
                 "template": {
                     "spec": {
-                        "initContainers": [
-                            {"name": "init", "image": "busybox:1.36"}
-                        ],
-                        "containers": [
-                            {"name": "app", "image": "nginx:1.24.0"}
-                        ]
+                        "initContainers": [{"name": "init", "image": "busybox:1.36"}],
+                        "containers": [{"name": "app", "image": "nginx:1.24.0"}],
                     }
                 }
-            }
+            },
         }
         images = discover_resources.find_container_images_in_yaml(data)
         assert len(images) == 2
 
     def test_no_images(self):
         """Test data without images."""
-        data = {
-            "kind": "ConfigMap",
-            "data": {"key": "value"}
-        }
+        data = {"kind": "ConfigMap", "data": {"key": "value"}}
         images = discover_resources.find_container_images_in_yaml(data)
         assert len(images) == 0
 
@@ -186,3 +183,173 @@ class TestShouldIgnoreHelmChart:
         ignore_config = {"helmCharts": [{"name": "prometheus"}]}
         ignored, reason = discover_resources.should_ignore_helm_chart("grafana", ignore_config)
         assert ignored is False
+
+
+class TestFindHelmSource:
+    """Tests for _find_helm_source - covers both Argo CD Application source shapes."""
+
+    def test_legacy_single_source(self):
+        """The old spec.source shape must still be found."""
+        spec = {"source": {"chart": "grafana", "repoURL": "https://example.com/charts"}}
+        source = discover_resources._find_helm_source(spec)
+        assert source is not None
+        assert source["chart"] == "grafana"
+
+    def test_multi_source_helm_chart(self):
+        """A multi-source Application (spec.sources[]) must be found too -
+        this was completely invisible before, since only spec.source was
+        ever checked."""
+        spec = {
+            "sources": [
+                {"chart": "sealed-secrets", "repoURL": "https://bitnami-labs.github.io/sealed-secrets"},
+                {"repoURL": "https://github.com/example/repo", "path": "apps/sealed-secrets"},
+            ]
+        }
+        source = discover_resources._find_helm_source(spec)
+        assert source is not None
+        assert source["chart"] == "sealed-secrets"
+
+    def test_multi_source_chart_not_first(self):
+        """The Helm chart source isn't always sources[0] - must not assume order."""
+        spec = {
+            "sources": [
+                {"repoURL": "https://github.com/example/repo", "path": "apps/foo"},
+                {"chart": "foo", "repoURL": "https://example.com/charts"},
+            ]
+        }
+        source = discover_resources._find_helm_source(spec)
+        assert source is not None
+        assert source["chart"] == "foo"
+
+    def test_git_only_multi_source_no_match(self):
+        """A multi-source app with no Helm chart source at all (e.g. two git
+        sources) should return None, not error."""
+        spec = {
+            "sources": [
+                {"repoURL": "https://github.com/example/repo-a"},
+                {"repoURL": "https://github.com/example/repo-b"},
+            ]
+        }
+        assert discover_resources._find_helm_source(spec) is None
+
+    def test_no_source_or_sources(self):
+        """A spec with neither key should return None, not raise."""
+        assert discover_resources._find_helm_source({}) is None
+
+    def test_null_spec_returns_none_instead_of_raising(self):
+        """A manifest with a present-but-null `spec:` parses to Python
+        None here, not a missing key - data["spec"] doesn't raise
+        KeyError for that case, so process_argo_app_file's
+        except (KeyError, TypeError) alone doesn't catch the
+        AttributeError that spec.get(...) on None used to raise. One bad
+        manifest crashed discovery for every file in the repo before this
+        guard existed."""
+        assert discover_resources._find_helm_source(None) is None
+
+
+class TestMergeConfigsPreservesUnknownSections:
+    """Tests for merge_configs - covers the top-level section preservation
+    fix. Before this, any existing top-level key not in the hardcoded
+    {argoApps, kustomizeHelmCharts, chartDependencies, dockerImages, ignore}
+    set was silently dropped on every auto-discover run - confirmed against
+    a real repo with a manually-maintained 'helmCharts' section (pre-dating
+    the argoApps/kustomizeHelmCharts/chartDependencies split) that would
+    have been deleted entirely."""
+
+    def test_unknown_section_preserved(self):
+        existing = {
+            "helmCharts": [{"name": "nfs-subdir-external-provisioner", "repository": "https://example.com"}],
+            "dockerImages": [],
+        }
+        discovered = {"dockerImages": []}
+        merged = discover_resources.merge_configs(existing, discovered)
+        assert merged["helmCharts"] == existing["helmCharts"]
+
+    def test_known_sections_not_duplicated_as_unknown(self):
+        """A known section (dockerImages) must go through its normal merge
+        logic, not get double-handled by the preservation fallback."""
+        existing = {
+            "dockerImages": [
+                {
+                    "id": "app",
+                    "registry": "dockerhub",
+                    "repository": "org/app",
+                    "currentTag": "1.0.0",
+                    "file": "app.yaml",
+                    "yamlPath": ["spec", "image"],
+                }
+            ]
+        }
+        discovered = {"dockerImages": []}
+        merged = discover_resources.merge_configs(existing, discovered)
+        assert len(merged["dockerImages"]) == 1
+        assert merged["dockerImages"][0]["id"] == "app"
+
+    def test_ignore_section_still_preserved(self):
+        """Regression guard: 'ignore' already had its own explicit handling
+        before this fix - must keep working unchanged."""
+        existing = {"ignore": {"dockerImages": [{"repository": "some/thing"}]}}
+        discovered = {}
+        merged = discover_resources.merge_configs(existing, discovered)
+        assert merged["ignore"] == existing["ignore"]
+
+
+class TestRoundtripCommentPreservation:
+    """Proves the actual end-to-end claim: running a real .update-config.yaml
+    through load -> merge_configs -> dump with ruamel.yaml's round-trip mode
+    keeps every existing comment intact, while still correctly adding new
+    entries discovery finds. A plain yaml.safe_load/yaml.dump round-trip
+    (what this script used before) has no concept of comments at all and
+    would silently drop every one of these on write."""
+
+    def test_header_and_inline_comments_survive_a_real_merge(self):
+        original = """\
+# Consumed by update-versions.yml. Re-run discover-versions.yml after
+# adding new apps to pick up anything missing here.
+argoApps:
+  - name: sealed-secrets
+    repoUrl: https://bitnami-labs.github.io/sealed-secrets
+    file: apps/sealed-secrets/application.yaml
+  # newly-added apps go below this line
+dockerImages: []
+# home-assistant is deliberately NOT tracked - see PR #42 for why.
+"""
+        existing = discover_resources.load_yaml_roundtrip(original)
+        discovered = {
+            "argoApps": [
+                {
+                    "name": "loki",
+                    "repoUrl": "https://grafana.github.io/helm-charts",
+                    "file": "apps/loki/application.yaml",
+                },
+            ]
+        }
+
+        merged = discover_resources.merge_configs(existing, discovered)
+        output = discover_resources.dump_yaml_roundtrip(merged)
+
+        # Every original comment is still there, verbatim.
+        assert "# Consumed by update-versions.yml. Re-run discover-versions.yml after" in output
+        assert "# newly-added apps go below this line" in output
+        assert "# home-assistant is deliberately NOT tracked - see PR #42 for why." in output
+        # The existing entry is untouched, and the new one was genuinely added.
+        assert "name: sealed-secrets" in output
+        assert "name: loki" in output
+
+    def test_existing_empty_section_with_comment_is_not_replaced_wholesale(self):
+        """An existing-but-empty section (dockerImages: [] with its own
+        trailing comment) must not be discarded just because it's empty -
+        confirmed via a real regression this exact scenario would hit if
+        merge_configs used truthiness instead of an explicit None check."""
+        original = """\
+argoApps: []
+dockerImages: []  # nothing tracked yet, added on purpose
+"""
+        existing = discover_resources.load_yaml_roundtrip(original)
+        discovered = {"dockerImages": [{"id": "app", "registry": "dockerhub", "repository": "org/app"}]}
+
+        merged = discover_resources.merge_configs(existing, discovered)
+        output = discover_resources.dump_yaml_roundtrip(merged)
+
+        assert "# nothing tracked yet, added on purpose" in output
+        assert "id: app" in output

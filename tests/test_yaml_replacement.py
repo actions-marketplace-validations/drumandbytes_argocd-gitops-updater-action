@@ -91,33 +91,21 @@ class TestReplaceYamlScalar:
     def test_new_tag_unquoted(self):
         """Test replacing unquoted newTag value in kustomization.yaml."""
         text = "images:\n  - name: ghost\n    newTag: 6.14.0-alpine3.23\n"
-        new_text, count = update_versions.replace_yaml_scalar(
-            text, "newTag", "6.14.0-alpine3.23", "6.15.0-alpine3.23"
-        )
+        new_text, count = update_versions.replace_yaml_scalar(text, "newTag", "6.14.0-alpine3.23", "6.15.0-alpine3.23")
         assert count == 1
         assert "newTag: 6.15.0-alpine3.23" in new_text
 
     def test_new_tag_quoted(self):
         """Test replacing quoted newTag value in kustomization.yaml."""
         text = 'images:\n  - name: curlimages/curl\n    newTag: "8.12.1"\n'
-        new_text, count = update_versions.replace_yaml_scalar(
-            text, "newTag", "8.12.1", "8.13.0"
-        )
+        new_text, count = update_versions.replace_yaml_scalar(text, "newTag", "8.12.1", "8.13.0")
         assert count == 1
         assert 'newTag: "8.13.0"' in new_text
 
     def test_new_tag_only_replaces_first(self):
         """Test that only the first newTag occurrence is replaced when values differ."""
-        text = (
-            "images:\n"
-            "  - name: app\n"
-            "    newTag: 1.0.0\n"
-            "  - name: other\n"
-            "    newTag: 2.0.0\n"
-        )
-        new_text, count = update_versions.replace_yaml_scalar(
-            text, "newTag", "1.0.0", "1.1.0"
-        )
+        text = "images:\n  - name: app\n    newTag: 1.0.0\n  - name: other\n    newTag: 2.0.0\n"
+        new_text, count = update_versions.replace_yaml_scalar(text, "newTag", "1.0.0", "1.1.0")
         assert count == 1
         assert "newTag: 1.1.0" in new_text
         assert "newTag: 2.0.0" in new_text
@@ -138,9 +126,7 @@ class TestReplaceYamlNewTag:
             '    newTag: "8.12.1"\n'
         )
         # Update only the second image (init)
-        new_text, count = update_versions.replace_yaml_new_tag(
-            text, "ghcr.io/owner/init", "latest", "1.2.0"
-        )
+        new_text, count = update_versions.replace_yaml_new_tag(text, "ghcr.io/owner/init", "latest", "1.2.0")
         assert count == 1
         # First image should still be "latest"
         assert "  - name: ghcr.io/owner/app\n    newTag: latest\n" in new_text
@@ -149,28 +135,15 @@ class TestReplaceYamlNewTag:
 
     def test_preserves_quotes(self):
         """Test that quotes around newTag value are preserved."""
-        text = (
-            "images:\n"
-            "  - name: curlimages/curl\n"
-            '    newTag: "8.12.1"\n'
-        )
-        new_text, count = update_versions.replace_yaml_new_tag(
-            text, "curlimages/curl", "8.12.1", "8.13.0"
-        )
+        text = 'images:\n  - name: curlimages/curl\n    newTag: "8.12.1"\n'
+        new_text, count = update_versions.replace_yaml_new_tag(text, "curlimages/curl", "8.12.1", "8.13.0")
         assert count == 1
         assert 'newTag: "8.13.0"' in new_text
 
     def test_handles_intermediate_fields(self):
         """Test that intermediate fields between name and newTag are handled."""
-        text = (
-            "images:\n"
-            "  - name: ghost\n"
-            "    newName: ghcr.io/ghost/ghost\n"
-            "    newTag: 6.14.0\n"
-        )
-        new_text, count = update_versions.replace_yaml_new_tag(
-            text, "ghost", "6.14.0", "6.15.0"
-        )
+        text = "images:\n  - name: ghost\n    newName: ghcr.io/ghost/ghost\n    newTag: 6.14.0\n"
+        new_text, count = update_versions.replace_yaml_new_tag(text, "ghost", "6.14.0", "6.15.0")
         assert count == 1
         assert "newTag: 6.15.0" in new_text
         assert "newName: ghcr.io/ghost/ghost" in new_text
@@ -179,9 +152,110 @@ class TestReplaceYamlNewTag:
         """Test fallback to replace_yaml_scalar when name doesn't match."""
         text = "images:\n  - name: other\n    newTag: 1.0.0\n"
         # Using a non-matching name should fall back
-        new_text, count = update_versions.replace_yaml_new_tag(
-            text, "nonexistent", "1.0.0", "2.0.0"
-        )
+        new_text, count = update_versions.replace_yaml_new_tag(text, "nonexistent", "1.0.0", "2.0.0")
         # Fallback should still find and replace the value
         assert count == 1
         assert "newTag: 2.0.0" in new_text
+
+
+class TestFindMatchingHelmSource:
+    """Tests for _find_matching_helm_source - covers both Argo CD
+    Application source shapes. Mirrors discover-resources.py's
+    _find_helm_source tests, but this one matches by chart name since a
+    multi-source app pairs a Helm chart source with a companion git source."""
+
+    def test_legacy_single_source(self):
+        spec = {"source": {"chart": "grafana", "repoURL": "https://example.com/charts", "targetRevision": "1.0.0"}}
+        source = update_versions._find_matching_helm_source(spec, "grafana")
+        assert source is not None
+        assert source["targetRevision"] == "1.0.0"
+
+    def test_multi_source_matches_by_chart_name(self):
+        """This is the exact shape that was silently unsupported before -
+        every multi-source Application in a real consuming repo (Helm chart
+        source paired with a companion git/directory source) meant
+        update_argo_app_chart always fell through to 'no spec.source,
+        skipping' and never updated anything."""
+        spec = {
+            "sources": [
+                {
+                    "chart": "sealed-secrets",
+                    "repoURL": "https://bitnami-labs.github.io/sealed-secrets",
+                    "targetRevision": "2.19.3",
+                },
+                {"repoURL": "https://github.com/example/repo", "path": "apps/sealed-secrets"},
+            ]
+        }
+        source = update_versions._find_matching_helm_source(spec, "sealed-secrets")
+        assert source is not None
+        assert source["targetRevision"] == "2.19.3"
+
+    def test_multi_source_wrong_chart_name_no_match(self):
+        """Must match by chart name, not just 'the first source with a
+        chart key' - otherwise a repo tracking multiple different charts
+        across different Applications could patch the wrong one."""
+        spec = {
+            "sources": [
+                {"chart": "grafana", "repoURL": "https://example.com/charts", "targetRevision": "1.0.0"},
+            ]
+        }
+        assert update_versions._find_matching_helm_source(spec, "sealed-secrets") is None
+
+    def test_no_source_or_sources(self):
+        assert update_versions._find_matching_helm_source({}, "grafana") is None
+
+
+class TestReplaceYamlScalarAnchored:
+    """Tests for replace_yaml_scalar_anchored - proves the fix for two
+    real bugs: a multi-source Application's companion source could have
+    its targetRevision rewritten instead of the Helm chart's, and a
+    kustomization.yaml/Chart.yaml with two entries sharing the same
+    current version could have the wrong one bumped."""
+
+    def test_targets_the_source_with_matching_chart_not_first_targetrevision(self):
+        """The exact multi-source bug: the companion (non-Helm) source's
+        targetRevision happens to equal the chart's current version and
+        appears earlier in the file - an unscoped replace would rewrite
+        that line instead of the chart's."""
+        text = (
+            "spec:\n"
+            "  sources:\n"
+            "    - repoURL: https://github.com/example/repo\n"
+            "      targetRevision: 2.19.3\n"
+            "      path: apps/sealed-secrets\n"
+            "    - repoURL: https://bitnami-labs.github.io/sealed-secrets\n"
+            "      chart: sealed-secrets\n"
+            "      targetRevision: 2.19.3\n"
+        )
+        new_text, count = update_versions.replace_yaml_scalar_anchored(
+            text, "chart", "sealed-secrets", "targetRevision", "2.19.3", "2.20.0"
+        )
+        assert count == 1
+        # The Helm source's targetRevision changed...
+        assert "chart: sealed-secrets\n      targetRevision: 2.20.0" in new_text
+        # ...and the companion git source's identical-looking value did not:
+        # exactly one "2.19.3" (the companion's) survives, and exactly one
+        # "2.20.0" (the chart's, newly written) exists.
+        assert new_text.count("2.19.3") == 1
+        assert new_text.count("2.20.0") == 1
+
+    def test_kustomize_version_anchored_by_name_not_first_match(self):
+        """Two helmCharts entries sharing the same current version: only
+        the one matching the given name must be bumped."""
+        text = "helmCharts:\n  - name: chart-a\n    version: 1.0.0\n  - name: chart-b\n    version: 1.0.0\n"
+        new_text, count = update_versions.replace_yaml_scalar_anchored(
+            text, "name", "chart-b", "version", "1.0.0", "2.0.0", list_item=True
+        )
+        assert count == 1
+        assert "name: chart-a\n    version: 1.0.0" in new_text
+        assert "name: chart-b\n    version: 2.0.0" in new_text
+
+    def test_falls_back_to_unscoped_replace_when_anchor_not_found(self):
+        """Graceful degradation, matching replace_yaml_new_tag's existing
+        fallback behavior, rather than silently doing nothing."""
+        text = "targetRevision: 1.0.0\n"
+        new_text, count = update_versions.replace_yaml_scalar_anchored(
+            text, "chart", "nonexistent", "targetRevision", "1.0.0", "2.0.0"
+        )
+        assert count == 1
+        assert "targetRevision: 2.0.0" in new_text

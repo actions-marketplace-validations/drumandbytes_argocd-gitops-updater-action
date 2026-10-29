@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.7](https://github.com/drumandbytes/argocd-gitops-updater-action/compare/v2.2.6...v2.2.7) (2026-10-04)
+
+
+### Bug Fixes
+
+* **discover:** drop the [@digest](https://github.com/digest) suffix when parsing image references ([#54](https://github.com/drumandbytes/argocd-gitops-updater-action/issues/54)) ([1bf3afd](https://github.com/drumandbytes/argocd-gitops-updater-action/commit/1bf3afd6c98f070c0d679c0d240ee191819e278d))
+
+## [2.2.6](https://github.com/drumandbytes/argocd-gitops-updater-action/compare/v2.2.5...v2.2.6) (2026-09-21)
+
+
+### Performance Improvements
+
+* **updater:** cache Helm index requests by repo URL ([#46](https://github.com/drumandbytes/argocd-gitops-updater-action/issues/46)) ([449a7b8](https://github.com/drumandbytes/argocd-gitops-updater-action/commit/449a7b8e3e7ff141b58f0bd935ef6541c94727de))
+
+## [2.2.5](https://github.com/drumandbytes/argocd-gitops-updater-action/compare/v2.2.4...v2.2.5) (2026-09-20)
+
+
+### Bug Fixes
+
+* drop paths-ignore from the workflow hosting the required-check gate ([#43](https://github.com/drumandbytes/argocd-gitops-updater-action/issues/43)) ([88df502](https://github.com/drumandbytes/argocd-gitops-updater-action/commit/88df5022216049ba2fb963b27baf08d9c5e323cf))
+
 ## [2.2.4](https://github.com/drumandbytes/argocd-gitops-updater-action/compare/v2.2.3...v2.2.4) (2026-09-06)
 
 

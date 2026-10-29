@@ -4,6 +4,8 @@
 [![CI](https://github.com/drumandbytes/argocd-gitops-updater-action/actions/workflows/ci.yml/badge.svg)](https://github.com/drumandbytes/argocd-gitops-updater-action/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+[More Drumandbytes projects](https://drumandbytes.com/projects/?ref=argocd-gitops-updater-action-readme)
+
 > GitHub Action for automated Helm chart and Docker image version updates. GitOps-friendly with ArgoCD/Kustomize support, auto-discovery, semantic versioning, and notifications (Slack/Teams/Discord/Telegram)
 
 Automatically keep your GitOps repositories up-to-date by checking for new versions of Helm charts and Docker images, creating pull requests with updates, and notifying your team.
@@ -510,3 +512,7 @@ MIT License - see [LICENSE](LICENSE) file for details
 ## ⭐ Show Your Support
 
 If this action helps you, please consider giving it a star! ⭐
+
+## How it was made
+
+Built with the help of an AI coding assistant (Claude). I review and test what gets published.

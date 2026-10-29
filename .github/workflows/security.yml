@@ -1,18 +1,18 @@
 name: Security
 
-# Split out of the CI workflow deliberately. Auto-merge gates on the CI
-# workflow's conclusion, so keeping the scan in CI meant a vulnerability in
-# one package blocked merging a Dependabot PR that fixed a different one —
-# the gate held its own fixes hostage. Findings still fail this workflow.
+# Separate from CI so a finding can't block auto-merge of an unrelated Dependabot fix.
 on:
-  push:
-    branches: [main]
   pull_request:
+  schedule:
+    - cron: '0 6 * * 1'
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   security:
